@@ -1,0 +1,32 @@
+# Generated from planner/themes.py (tests/test_themes.py keeps them in sync)
+
+[theme]
+font = "Plus Jakarta Sans:https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+baseRadius = "0.6rem"
+buttonRadius = "0.6rem"
+showWidgetBorder = true
+showSidebarBorder = true
+
+[theme.light]
+primaryColor = "#4F46E5"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F7FB"
+textColor = "#111827"
+borderColor = "#E5E7EB"
+linkColor = "#4F46E5"
+greenColor = "#16A34A"
+
+[theme.dark]
+primaryColor = "#F97316"
+backgroundColor = "#18181B"
+secondaryBackgroundColor = "#27272A"
+textColor = "#FAFAFA"
+borderColor = "#3F3F46"
+linkColor = "#FB923C"
+greenColor = "#4ADE80"
+
+[server]
+maxUploadSize = 20
+
+[browser]
+gatherUsageStats = false
