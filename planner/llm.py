@@ -88,7 +88,38 @@ class LLM:
         self._key = api_key
         self._timeout = timeout
         self._json_mode = True
+        self._backups = [m for m in p.backup_models if m != self.model]
+        self._list_tried = False
+        self._min_interval = p.min_interval
+        self._last_call = 0.0
         self.calls = 0
+        self.notes: list[str] = []  # e.g. "model X not found, switched to Y"
+
+    def _next_model(self) -> bool:
+        """After a 'model not found': switch to the next backup, else to a model the provider lists. False if none."""
+        if not self._backups and not self._list_tried:
+            self._list_tried = True
+            self._backups = self._listed_models()
+        if not self._backups:
+            return False
+        old, self.model = self.model, self._backups.pop(0)
+        self.notes.append(f"Model '{old}' isn't available on {self.provider}; using '{self.model}' instead.")
+        return True
+
+    def _listed_models(self) -> list[str]:
+        """Text models this key can use, best guess first (from the provider's /models list)."""
+        import urllib.request
+
+        if not self._key:  # Ollama: keep the clear "ollama pull <model>" advice instead of guessing
+            return []
+        req = urllib.request.Request(self._url.removesuffix("/chat/completions") + "/models",
+                                     headers={"Authorization": f"Bearer {self._key}", "User-Agent": "content-planner"})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                ids = [str(m.get("id", "")).removeprefix("models/") for m in json.loads(r.read()).get("data", [])]
+        except Exception:
+            return []
+        return pick_text_models(self.provider, ids, exclude={self.model})
 
     @property
     def label(self) -> str:
@@ -104,6 +135,10 @@ class LLM:
             if self._json_mode:
                 payload["response_format"] = {"type": "json_object"}
             try:
+                wait = self._last_call + self._min_interval - time.monotonic()
+                if wait > 0:
+                    time.sleep(wait)
+                self._last_call = time.monotonic()
                 self.calls += 1
                 r = post_json(self._url, payload, self._key, self._timeout)
                 content = (r.get("choices") or [{}])[0].get("message", {}).get("content") or ""
@@ -120,7 +155,10 @@ class LLM:
                 if e.status in (401, 403):
                     raise LLMError(f"{self.provider} did not accept the API key.") from None
                 if e.status == 404:
-                    raise LLMError(f"Model '{self.model}' was not found on {self.provider}.") from None
+                    if self._next_model():
+                        return self.json(system, user, temperature)
+                    raise LLMError(f"Model '{self.model}' was not found on {self.provider}. Type a current model "
+                                   f"name in the sidebar's Model box.") from None
                 if e.status == 0:
                     if "timed out" in e.message and attempt < 2:
                         continue
@@ -135,6 +173,25 @@ class LLM:
                     continue
                 raise
         raise LLMError(f"{self.provider} did not give a usable answer.")
+
+
+_SKIP = ("tts", "audio", "image", "live", "embed", "vision", "guard", "whisper", "veo", "imagen", "robotics",
+         "computer-use", "aqa")
+
+
+def pick_text_models(provider: str, ids: list[str], exclude: set[str] = frozenset()) -> list[str]:
+    """Chat models from a provider's model list, the most suitable first."""
+    ids = [i for i in dict.fromkeys(ids) if i and i not in exclude and not any(s in i.lower() for s in _SKIP)]
+    if provider == "Gemini":
+        ids = [i for i in ids if i.startswith("gemini") and "flash" in i]
+        # stable before preview, full Flash before Flash-Lite, newest version first
+        def ver(i):
+            m = re.search(r"gemini-(\d+(?:\.\d+)?)", i)
+            return float(m.group(1)) if m else 0.0
+        return sorted(ids, key=lambda i: ("preview" in i or "exp" in i, "lite" in i, -ver(i)))
+    if provider == "OpenRouter":
+        return [i for i in ids if i.endswith(":free")]
+    return ids
 
 
 class FallbackLLM:
@@ -153,6 +210,10 @@ class FallbackLLM:
     @property
     def calls(self) -> int:
         return sum(getattr(c, "calls", 0) for c in self.chain)
+
+    @property
+    def notes(self) -> list[str]:
+        return [n for c in self.chain for n in getattr(c, "notes", [])]
 
     def json(self, system: str, user: str, temperature: float = 0.7) -> dict:
         while True:

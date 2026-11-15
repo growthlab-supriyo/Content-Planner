@@ -215,6 +215,7 @@ if go:
         project = new_project(topic, location)
         ss["paid"].add(project["created"])
         ss["notices"] = []
+        llm = None
         try:
             with st.status("Building your content plan…", expanded=True) as status:
                 bar = st.progress(0.0, text="Starting")
@@ -242,6 +243,12 @@ if go:
                               expanded=False)
         except LLMError as e:
             st.error(str(e))
+            if C.ONLINE and not user_key and not project.get("stage2"):
+                quota.refund(vid)  # nothing was made, so the free run isn't counted
+                ss["paid"].discard(project["created"])
+                st.caption("This run didn't count towards your free runs.")
+        finally:
+            ss["notices"] += [n for n in getattr(llm, "notes", []) if n not in ss["notices"]]
 
 # ---------- results ----------
 project = ss.get("project")

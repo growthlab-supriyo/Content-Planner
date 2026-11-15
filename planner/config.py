@@ -20,6 +20,9 @@ class Provider:
     key_name: str | None  # name in .streamlit/secrets.toml / env; None = no key needed
     key_help: str
     local_only: bool = False
+    # Tried in order when the chosen model answers "not found" (free model names get retired now and then).
+    backup_models: tuple[str, ...] = ()
+    min_interval: float = 0.0  # seconds between calls, to stay under a free per-minute limit
 
 
 PROVIDERS: dict[str, Provider] = {
@@ -27,8 +30,13 @@ PROVIDERS: dict[str, Provider] = {
         "Local Ollama", os.environ.get("OLLAMA_URL", "http://localhost:11434") + "/v1", "qwen2.5:7b",
         None, "Runs on this computer. Start Ollama first.", local_only=True),
     "Gemini": Provider(
-        "Gemini", "https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-2.5-flash",
-        "GEMINI_API_KEY", "Free key: aistudio.google.com/apikey"),
+        # Flash-Lite: the free tier allows about 15 requests/minute and 500/day, enough for ~12 full plans a day.
+        # Full Flash allows only ~20/day (a full plan needs ~35 calls), so it's a backup only.
+        # (2.5 Flash was retired for new keys in 2026; free limits change, see aistudio.google.com/rate-limit.)
+        "Gemini", "https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-3.5-flash-lite",
+        "GEMINI_API_KEY", "Free key: aistudio.google.com/apikey",
+        backup_models=("gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-flash-latest"),
+        min_interval=4.5),  # stay under 15 requests a minute
     "Groq": Provider(
         "Groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile",
         "GROQ_API_KEY", "Free key: console.groq.com/keys"),

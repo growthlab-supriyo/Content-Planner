@@ -44,6 +44,14 @@ class Quota:
             self._total += 1
             return True
 
+    def refund(self, vid: str) -> None:
+        """Give a free run back when it failed before producing anything (e.g. a provider error)."""
+        with self._lock:
+            self._roll()
+            if self._counts.get(vid, 0) > 0:
+                self._counts[vid] -= 1
+                self._total = max(0, self._total - 1)
+
     def cap_reached(self) -> bool:
         with self._lock:
             self._roll()
