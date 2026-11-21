@@ -12,7 +12,9 @@ import time
 from .config import PROVIDERS
 
 
-MAX_ANSWER_TOKENS = 1800
+# Enough for the longest answers (6 clusters x 4 titles in Stage 5); at 1,800 those got cut off and a whole batch
+# was lost. A model whose free tier allows less per minute gets a smaller limit automatically (see "too large").
+MAX_ANSWER_TOKENS = 3000
 
 
 class LLMError(Exception):
@@ -21,6 +23,15 @@ class LLMError(Exception):
 
 class RateLimited(LLMError):
     """The free tier said 'too many requests'."""
+
+
+class ModelUnavailable(LLMError):
+    """This model can't be used (doesn't exist for this key, or rejects the request format): try another model."""
+
+
+# Models that think before answering. Their thinking counts toward the answer's token limit, so they get a larger
+# limit and are asked to think briefly (JSON answers here don't need long reasoning).
+THINKING = re.compile(r"gemini-[\d.]+-flash(?!-lite)|gemini-flash-latest|gpt-oss|qwen3|deepseek-r|nemotron", re.I)
 
 
 def parse_json(text: str) -> dict:
@@ -78,7 +89,10 @@ def post_json(url: str, payload: dict, api_key: str | None, timeout: float) -> d
 
 
 class LLM:
-    def __init__(self, provider: str, model: str | None = None, api_key: str | None = None, timeout: float = 240):
+    def __init__(self, provider: str, model: str | None = None, api_key: str | None = None, timeout: float = 240,
+                 backups: bool = True, min_interval: float | None = None):
+        """backups=False: on 'model not found' raise ModelUnavailable instead of switching to another model of the
+        same provider (used when each stage has its own list of models, so the next model in that list is used)."""
         p = PROVIDERS[provider]
         self.provider = provider
         self.model = model or p.default_model
@@ -88,11 +102,17 @@ class LLM:
         self._key = api_key
         self._timeout = timeout
         self._json_mode = True
-        self._backups = [m for m in p.backup_models if m != self.model]
-        self._list_tried = False
-        self._min_interval = p.min_interval
+        self._system_ok = True
+        self._thinking = bool(THINKING.search(self.model))
+        self._max_tokens = MAX_ANSWER_TOKENS * (3 if self._thinking else 1)
+        self._backups = [m for m in p.backup_models if m != self.model] if backups else []
+        self._list_tried = not backups
+        self._min_interval = p.min_interval if min_interval is None else min_interval
+        self.exhausted = False  # daily limit reached: skip this model for the rest of the run
         self._last_call = 0.0
         self.calls = 0
+        self.ok = 0          # calls that returned usable JSON
+        self.seconds = 0.0   # time spent waiting for answers (not counting the spacing between calls)
         self.notes: list[str] = []  # e.g. "model X not found, switched to Y"
 
     def _next_model(self) -> bool:
@@ -126,12 +146,18 @@ class LLM:
         return f"{self.provider} · {self.model}"
 
     def json(self, system: str, user: str, temperature: float = 0.7) -> dict:
-        msgs = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-        for attempt in range(3):
+        for attempt in range(4):
+            # Some models (Gemma) take no system message: then it goes at the top of the user message.
+            if self._system_ok:
+                msgs = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+            else:
+                msgs = [{"role": "user", "content": f"{system}\n\n{user}"}]
             # max_tokens stops a small model that gets stuck repeating itself (seen once: 12 minutes on one call).
             # Normal answers here are well under 1,200 tokens; a cut-off answer is unreadable JSON and is re-asked.
             payload = {"model": self.model, "messages": msgs, "temperature": temperature,
-                       "max_tokens": MAX_ANSWER_TOKENS}
+                       "max_tokens": self._max_tokens}
+            if self._thinking:
+                payload["reasoning_effort"] = "low"
             if self._json_mode:
                 payload["response_format"] = {"type": "json_object"}
             try:
@@ -140,27 +166,58 @@ class LLM:
                     time.sleep(wait)
                 self._last_call = time.monotonic()
                 self.calls += 1
-                r = post_json(self._url, payload, self._key, self._timeout)
+                started = time.monotonic()
+                try:
+                    r = post_json(self._url, payload, self._key, self._timeout)
+                finally:
+                    self.seconds += time.monotonic() - started
                 content = (r.get("choices") or [{}])[0].get("message", {}).get("content") or ""
-                return parse_json(content)
+                data = parse_json(content)
+                self.ok += 1
+                return data
             except HTTPError as e:
                 if e.status == 429:
-                    if attempt == 0:
-                        time.sleep(8)  # one short wait, then let the caller fall back
+                    # A per-minute limit clears in seconds: wait (as long as the provider asks, if it says) and
+                    # try again, instead of letting a whole batch of pages fall back to empty answers.
+                    # A daily limit won't clear today: hand over to the next provider straight away.
+                    if "too large" in e.message.lower():
+                        # the answer limit we asked for is above this model's free per-minute token allowance
+                        # (Groq: "... output tokens per minute (OTPM): Limit 1000, Requested 1987"): ask for less
+                        m = re.search(r"Limit (\d+)", e.message)
+                        cap = int(int(m.group(1)) * 0.9) if m else self._max_tokens // 2
+                        if 300 <= cap < self._max_tokens:
+                            self._max_tokens = cap
+                            continue
+                    daily = bool(re.search(r"per ?day|daily", e.message, re.I))
+                    if attempt < 2 and not daily:
+                        m = re.search(r"retry in ([\d.]+)\s*s", e.message, re.I)
+                        time.sleep(min(45.0, float(m.group(1)) + 1) if m else (10 if attempt == 0 else 25))
                         continue
-                    raise RateLimited(f"{self.provider} free limit reached: {_short(e)}") from None
-                if e.status == 400 and self._json_mode:  # some models reject JSON mode: ask in plain text
-                    self._json_mode = False
-                    continue
+                    self.exhausted = daily
+                    raise RateLimited(f"{self.label} free limit reached: {_short(e)}") from None
+                if e.status == 400:  # an option this model doesn't take: drop options one by one
+                    if self._thinking and "reason" in e.message.lower():
+                        self._thinking = False
+                        continue
+                    if self._system_ok and re.search(r"system|developer instruction", e.message, re.I):
+                        self._system_ok = False
+                        continue
+                    if self._json_mode:  # some models reject JSON mode: ask in plain text
+                        self._json_mode = False
+                        continue
+                    if self._thinking:
+                        self._thinking = False
+                        continue
+                    raise ModelUnavailable(f"{self.label} rejected the request: {_short(e)}") from None
                 if e.status in (401, 403):
-                    raise LLMError(f"{self.provider} did not accept the API key.") from None
+                    raise ModelUnavailable(f"{self.provider} did not accept the API key.") from None
                 if e.status == 404:
                     if self._next_model():
                         return self.json(system, user, temperature)
-                    raise LLMError(f"Model '{self.model}' was not found on {self.provider}. Type a current model "
-                                   f"name in the sidebar's Model box.") from None
+                    raise ModelUnavailable(f"Model '{self.model}' was not found on {self.provider}. Type a current "
+                                           f"model name in the sidebar's Model box.") from None
                 if e.status == 0:
-                    if "timed out" in e.message and attempt < 2:
+                    if "timed out" in e.message and attempt < 3:
                         continue
                     where = "Is Ollama running?" if self.provider == "Local Ollama" else "Check the internet connection."
                     raise LLMError(f"Could not reach {self.provider}. {where}") from None
@@ -195,13 +252,15 @@ def pick_text_models(provider: str, ids: list[str], exclude: set[str] = frozense
 
 
 class FallbackLLM:
-    """Use the first AI; if it hits its free limit, switch to the next one for the rest of the run."""
+    """Use the first AI; if it hits its free limit or can't be used, switch to the next one for the rest of the run."""
 
-    def __init__(self, chain: list, on_switch=None):
+    def __init__(self, chain: list, on_switch=None, name: str = ""):
         if not chain:
             raise LLMError("No AI provider is set up.")
         self.chain = list(chain)
+        self.all = list(chain)  # including models dropped after a limit, so their calls still count
         self.on_switch = on_switch or (lambda msg: None)
+        self.name = name  # the stage this chain serves, for messages
 
     @property
     def label(self) -> str:
@@ -209,21 +268,121 @@ class FallbackLLM:
 
     @property
     def calls(self) -> int:
-        return sum(getattr(c, "calls", 0) for c in self.chain)
+        return sum(getattr(c, "calls", 0) for c in self.all)
 
     @property
     def notes(self) -> list[str]:
-        return [n for c in self.chain for n in getattr(c, "notes", [])]
+        return [n for c in self.all for n in getattr(c, "notes", [])]
 
     def json(self, system: str, user: str, temperature: float = 0.7) -> dict:
+        while len(self.chain) > 1 and getattr(self.chain[0], "exhausted", False):
+            self.chain.pop(0)  # another stage already used up this model's daily limit
         while True:
             try:
                 return self.chain[0].json(system, user, temperature)
-            except RateLimited as e:
+            except (RateLimited, ModelUnavailable) as e:
                 if len(self.chain) == 1:
                     raise
                 old = self.chain.pop(0)
-                self.on_switch(f"{old.provider} hit its free limit ({e}). Switched to {self.chain[0].label}.")
+                why = "hit its free limit" if isinstance(e, RateLimited) else "isn't available"
+                where = f" for {self.name}" if self.name else ""
+                self.on_switch(f"{old.label} {why}{where} ({e}). Switched to {self.chain[0].label}.")
+
+
+class StageModels:
+    """A different AI model chain for each stage (see config.STAGE_MODELS), e.g. a strong model to choose the
+    angles and a fast high-quota model for bulk tagging. Stage code asks `for_stage(name)`; anything that isn't a
+    StageModels (a single LLM, a test fake) is used for every stage."""
+
+    def __init__(self, chains: dict[str, FallbackLLM], default: FallbackLLM):
+        self.chains, self.default = chains, default
+
+    def for_stage(self, stage: str):
+        return self.chains.get(stage) or self.default
+
+    def _models(self) -> list:
+        seen: dict[int, object] = {}
+        for ch in [*self.chains.values(), self.default]:
+            for m in ch.all:
+                seen[id(m)] = m
+        return list(seen.values())
+
+    @property
+    def calls(self) -> int:
+        return sum(getattr(m, "calls", 0) for m in self._models())
+
+    @property
+    def notes(self) -> list[str]:
+        return list(dict.fromkeys(n for m in self._models() for n in getattr(m, "notes", [])))
+
+    @property
+    def label(self) -> str:
+        return "a different model for each stage"
+
+    def stats(self) -> list[dict]:
+        """Per model: calls, usable answers, failures and average seconds per call (to pick the best primaries)."""
+        out = []
+        for m in self._models():
+            calls = getattr(m, "calls", 0)
+            if calls:
+                ok = getattr(m, "ok", 0)
+                out.append({"model": m.label, "calls": calls, "ok": ok, "failed": calls - ok,
+                            "avg_seconds": round(getattr(m, "seconds", 0.0) / calls, 1),
+                            "used_up": getattr(m, "exhausted", False)})
+        return sorted(out, key=lambda x: -x["calls"])
+
+    def used(self) -> dict[str, str]:
+        """Stage -> the model it is using now (after any switches)."""
+        return {s: ch.label for s, ch in self.chains.items()}
+
+    def json(self, system: str, user: str, temperature: float = 0.7) -> dict:
+        return self.default.json(system, user, temperature)
+
+
+def build_stage_models(keys: dict[str, str], default: FallbackLLM, on_switch=None,
+                       stage_models: dict[str, list[tuple[str, str]]] | None = None) -> StageModels:
+    """One chain per stage from config.STAGE_MODELS, using only providers we have a key for. The models of
+    `default` (the model chosen in the sidebar, plus its backups) are added at the end of every chain, so a stage
+    still runs when all its own models are used up. A model shared by several stages is one LLM object, so its
+    spacing between calls and its 'used up today' flag are shared too."""
+    from .config import STAGE_MODELS, STAGES, min_interval_for
+
+    cache: dict[tuple[str, str], LLM] = {}
+    chains: dict[str, FallbackLLM] = {}
+    for stage, entries in (stage_models or STAGE_MODELS).items():
+        chain = []
+        for provider, model in entries:
+            if PROVIDERS[provider].key_name and not keys.get(provider):
+                continue
+            if (provider, model) not in cache:
+                cache[(provider, model)] = LLM(provider, model, keys.get(provider), backups=False,
+                                               min_interval=min_interval_for(provider, model))
+            chain.append(cache[(provider, model)])
+        chain += [m for m in default.chain if m not in chain]
+        chains[stage] = FallbackLLM(chain, on_switch, name=STAGES.get(stage, stage))
+    return StageModels(chains, default)
+
+
+def get_list(data: dict, key: str) -> list:
+    """The list an answer gives under `key`. Models sometimes return the bare list instead of {"key": [...]}
+    (parse_json wraps that as {"items": [...]}), or use another name for the only list; both are accepted, so a
+    whole batch isn't lost over the answer's shape (seen in testing: 1 batch in 8 of Stage 5 ideas)."""
+    v = data.get(key) if isinstance(data, dict) else None
+    if isinstance(v, list):
+        return v
+    lists = [x for x in data.values() if isinstance(x, list)] if isinstance(data, dict) else []
+    return lists[0] if len(lists) == 1 else []
+
+
+def is_fatal(e: Exception) -> bool:
+    """Errors that asking again can't fix (bad key, no connection): stop the run instead of retrying."""
+    msg = str(e)
+    return any(s in msg for s in ("API key", "did not accept", "Could not reach"))
+
+
+def for_stage(llm, stage: str):
+    """The model for one stage: from a StageModels, or the same single model everywhere."""
+    return llm.for_stage(stage) if hasattr(llm, "for_stage") else llm
 
 
 def ollama_running(base: str | None = None, timeout: float = 2) -> tuple[bool, list[str]]:

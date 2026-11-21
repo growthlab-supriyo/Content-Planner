@@ -44,6 +44,13 @@ class FakeLLM:
         return a(user) if callable(a) else a
 
 
+@pytest.fixture(autouse=True)
+def no_retry_pause(monkeypatch):
+    from planner import config
+
+    monkeypatch.setattr(config, "AI_RETRY_PAUSE", 0.0)
+
+
 @pytest.fixture
 def embedder():
     return FakeEmbedder()

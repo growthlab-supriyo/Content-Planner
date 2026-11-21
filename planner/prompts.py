@@ -61,7 +61,7 @@ ANGLES: dict[str, dict] = {
                                    "shops, delivery, reviews, best brands or sellers.",
         "examples": ["yoga studio near me open now", "best yoga classes in indiranagar", "yoga centre near hsr layout",
                      "weekend yoga classes bangalore"],
-        "check": "local",
+        "check": None,  # naming a place is natural for local searches, not required
     },
     "fears": {
         "label": "Fears & Myths",
@@ -74,6 +74,47 @@ ANGLES: dict[str, dict] = {
 }
 
 ANGLE_ORDER = list(ANGLES)
+for _k, _a in ANGLES.items():
+    _a.setdefault("key", _k)
+    _a.setdefault("kind", _k)
+
+# The kinds an angle can be. The kind decides the quality check run on its list and how the location is used.
+KINDS = ("questions", "costs", "comparisons", "local", "services", "problems", "fears", "other")
+
+ANGLE_PROMPT = """Business / topic: {topic}
+Location: {location_text}
+
+Before researching keywords, work out how people search around this topic. Think about who searches (different
+customer types and situations) and the whole journey: first noticing a need or problem, learning, comparing
+options, worrying (fears, myths, side effects, "is it safe"), checking prices, and choosing a provider or product.
+
+List {k_min} to {k_max} search ANGLES for THIS topic: groups of searches that need their own research.
+Rules:
+- Cover the whole journey. These kinds must each appear: {required}.
+- First list the main services or product lines of this business (for a dental clinic: checkups and cleaning, gum
+  care, fillings and root canals, implants and dentures, braces and aligners, cosmetic, kids' dentistry,
+  emergencies...). Every angle must span ALL of them, not one: a comparisons angle compares options across every
+  service line (implant vs bridge, braces vs aligners, filling vs crown...), a fears angle covers worries about all
+  of them, a costs angle prices all of them. Never narrow an angle to one service.
+- Use each kind once, except "services" and "problems", which may appear more than once to cover different service
+  lines (e.g. "Restorative Treatments" and "Orthodontics").
+- Every angle must be something many real people search for. No niche or abstract angles that few would ever type
+  (bad: "interpreting patient feedback reliability", "clinic pricing transparency policies").
+- Add angles this topic really has beyond the required ones; don't force ones that don't fit.{feedback}
+For each angle give:
+- label: 1 to 4 words, Title Case.
+- kind: one of {kinds}. "questions" = real how/what/why questions, "problems" = symptoms or situations,
+  "services" = specific services or products, "costs" = prices and payment, "comparisons" = "x vs y" choices,
+  "fears" = worries, myths and safety doubts, "local" = finding a provider nearby, "other" = none of these.
+- instruction: 1 to 2 sentences telling a researcher exactly which searches to write for this angle.
+- examples: 3 or 4 short example searches for this topic.
+
+Return JSON only:
+{{"angles": [{{"label": "...", "kind": "...", "instruction": "...", "examples": ["...", "..."]}}]}}"""
+
+# Kinds every plan must have (local only when there is a location), and the kinds used at most once.
+REQUIRED_KINDS = ("questions", "problems", "costs", "comparisons", "fears")
+SINGLE_KINDS = ("questions", "costs", "comparisons", "fears", "local")
 
 USER_TEMPLATE = """Business / topic: {topic}
 Location: {location_text}
@@ -83,41 +124,54 @@ Angle: {label}
 
 Write {n} different search queries real people type into Google for this angle.
 Rules:
-- Natural English, all lowercase, 2 to 10 words each.
+- Only searches many real people make, in the words they'd type. No abstract, academic or niche phrasing that
+  hardly anyone searches (bad: "interpreting patient safety feedback", "testimonial reliability").
+- Never make up brand, clinic, product or doctor names: use only names that are real and widely known.
+- Natural English, all lowercase, 2 to 10 words each, spelled correctly, with a space between every word
+  (write "in salt lake", never "insalt lake"; place names spelled the way locals write them).
 - Vary the wording. Do not start more than 3 queries with the same two words.
 - Do not just add one word to the business name (bad: "{topic_l} cost", "{topic_l} price", "{topic_l} reviews").
 - {location_rule}
 - No numbering, no quotes, no duplicates.{feedback}
 
-Style example for a different business (a yoga studio), do not copy these:
+{examples_intro}
 {examples}
 
 Return JSON only: {{"queries": ["...", "..."]}}"""
 
 
-def location_rule(angle: str, location: str) -> str:
+def location_rule(kind: str, location: str) -> str:
     if not location:
         return "There is no location: do not add any city or area name."
-    if angle == "local":
-        return f"Every query must mention {location} (or a nearby area) or 'near me'."
-    if angle in ("services", "costs"):
+    if kind == "local":
+        return (f"You may mention {location}, a nearby area or 'near me' where people naturally would, but it's not "
+                f"required: write each query the way a local customer would really type it, with or without a place.")
+    if kind in ("services", "costs"):
         return f"Mention {location} in about one third of the queries only; the rest are general."
     return "These are general searches: do not add the location."
 
 
-def build_prompt(angle: str, topic: str, location: str, n: int, feedback: str = "",
+def get_angle(angle) -> dict:
+    """An angle as a dict: a built-in key ("costs") or an angle dict the AI planned."""
+    return ANGLES[angle] if isinstance(angle, str) else angle
+
+
+def build_prompt(angle, topic: str, location: str, n: int, feedback: str = "",
                  instructions: dict[str, str] | None = None) -> str:
-    a = ANGLES[angle]
-    instruction = (instructions or {}).get(angle)
+    a = get_angle(angle)
+    instruction = (instructions or {}).get(a["key"])
     if not instruction:
-        instruction = a.get("instruction_no_location") if (angle == "local" and not location) else None
+        instruction = a.get("instruction_no_location") if (a["kind"] == "local" and not location) else None
         instruction = instruction or a["instruction"]
+    planned = a.get("planned", False)
     return USER_TEMPLATE.format(
         topic=topic, topic_l=topic.lower(),
         location_text=location or "none (not a local search)",
         label=a["label"], instruction=instruction, n=n,
-        location_rule=location_rule(angle, location),
+        location_rule=location_rule(a["kind"], location),
         feedback=f"\n- {feedback}" if feedback else "",
+        examples_intro="Style examples, do not copy these:" if planned
+        else "Style example for a different business (a yoga studio), do not copy these:",
         examples=", ".join(f'"{e}"' for e in a["examples"]),
     )
 

@@ -31,18 +31,23 @@ def make_project():
 
 
 def stage4_answers(user):
-    if "grouped into" in user:
-        groups = re.findall(r"^Group (\d+): (.*)$", user, flags=re.M)
-        # the second group is left unnamed on purpose: code must fall back to its most typical page name
-        return {"pillars": [{"group": int(n), "name": f"Pillar {n}", "pillar_keyword": f"pillar {n} keyword",
-                             "pillar_title": f"Pillar {n} hub"} for n, _ in groups[:1]]}
+    if "Split the site into" in user:
+        return {"pillars": [
+            {"name": "Root Canal Care", "covers": ["root canal cost", "root canal pain", "root canal recovery"],
+             "pillar_keyword": "root canal treatment", "pillar_title": "Root Canal Treatment Guide"},
+            {"name": "Gums and Dentists", "covers": ["bleeding gums", "best dentist", "dentist near me"],
+             "pillar_keyword": "gum care", "pillar_title": "Gum Care Hub"},
+            {"name": "Unused Pillar", "covers": ["teeth whitening"], "pillar_keyword": "whitening",
+             "pillar_title": "Whitening"}]}
     if "subtopics: the H2" in user:
         pages = re.findall(r"^Page (\d+)\. ([^:]+):", user, flags=re.M)
         return {"pages": [{"page": int(n), "subtopics": [f"About {name}", "How it works", "Costs"]}
                           for n, name in pages]}
+    if "Pages were placed into pillars" in user:
+        return {"moves": []}
     if "MISSING" in user:
         return {"missing": [
-            {"pillar": "Pillar 1", "name": "Root Canal Cost", "intent": "Commercial",  # duplicate of existing
+            {"pillar": "Root Canal Care", "name": "Root Canal Cost", "intent": "Commercial",  # duplicate of existing
              "keywords": ["x y"], "subtopics": ["a"]},
             {"pillar": "Nowhere", "name": "Kids Dental Care", "intent": "Informational",
              "keywords": ["when should a child first see a dentist", "bleeding gums causes"], "subtopics": ["Age"]},
@@ -84,9 +89,10 @@ def test_topical_map_assigns_every_cluster_once_and_filters_gaps(embedder):
     s4 = p["stage4"]
     placed = [cid for pl in s4["pillars"] for cid in pl["cluster_ids"]]
     assert set(placed) == {c["id"] for c in all_clusters(p)} and len(placed) == len(set(placed))
-    assert len(s4["pillars"]) >= 2
-    assert s4["pillars"][0]["name"] == "Pillar 1"                # named by the AI
-    assert s4["pillars"][1]["name"] in {c["name"] for c in p["stage3"]["clusters"]}  # fallback name
+    pillar_of = {cid: pl["name"] for pl in s4["pillars"] for cid in pl["cluster_ids"]}
+    assert [pl["name"] for pl in s4["pillars"]] == ["Root Canal Care", "Gums and Dentists"]  # empty one dropped
+    assert pillar_of[1] == pillar_of[2] == "Root Canal Care"     # the code places pages by meaning
+    assert pillar_of[3] == pillar_of[4] == "Gums and Dentists"
     names = [g["name"] for g in s4["gap_clusters"]]
     assert names == ["Kids Dental Care"]                       # duplicate "Root Canal Cost" dropped
     gap = s4["gap_clusters"][0]
@@ -161,7 +167,7 @@ def test_map_keywords_no_free_keyword_left(embedder):
              {"cluster_id": 1, "type": "FAQs", "title": "Second", "ai_primary": "only one keyword"}]
     rows, leftover = map_keywords(ideas, clusters, [], embedder)
     assert rows[0]["primary"] == "only one keyword" and rows[0]["role"] == "Cluster Page"
-    assert rows[1]["primary"] == "" and rows[1]["note"]
+    assert len(rows) == 1  # the extra piece had no keyword of its own, so it was dropped
 
 
 def test_normalise_type():

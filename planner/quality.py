@@ -58,7 +58,71 @@ def location_tokens(location: str) -> list[str]:
 
 
 def mentions_location(q: str, loc_tokens: list[str]) -> bool:
-    return any(t in q for t in loc_tokens) or any(n in q for n in NEAR_ME)
+    return any(re.search(rf"\b{re.escape(t)}\b", q) for t in loc_tokens) or any(n in q for n in NEAR_ME)
+
+
+# Words that end a local query but are not place names ("dentist open on sunday", "clinic for kids").
+NOT_AREA = {"me", "now", "today", "tonight", "sunday", "sundays", "saturday", "weekend", "weekends", "holidays",
+            "night", "kids", "children", "adults", "seniors", "women", "men", "home", "budget", "emergency",
+            "insurance", "india", "town", "city", "area", "my area", "your area", "the area", "general",
+            "south", "north", "east", "west", "central", "city centre", "downtown"}
+# Real words that start with "in" and can end a local query; anything else like "ingaria" is "in garia" glued.
+IN_WORDS = {"insurance", "infection", "invisalign", "india", "injury", "inside", "instantly", "indoor", "info",
+            "information", "inlays", "implants", "intake", "interest", "installments", "instalments"}
+
+
+def area_tokens(keywords: list[str], location: str = "") -> list[str]:
+    """Area names the AI used in local queries ("... in park street", "... near salt lake").
+
+    The user types one location ("Kolkata"), but local queries name neighbourhoods. Knowing them lets the
+    clustering group "dentist in park street" with "dentist in lake town" (same service, different area)
+    instead of making one thin page per area. Returns location tokens plus found areas, longest first.
+    """
+    found = set(location_tokens(location)) if location else set()
+    glued = Counter(q.split()[-1] for q in keywords if q.split() and q.split()[-1].startswith("in"))
+    for w, n in glued.items():  # "... clinic ingaria" seen twice or more: the area is "garia"
+        if n >= 2 and len(w) >= 6 and w not in IN_WORDS and w[2:] not in NOT_AREA:
+            found.add(w[2:])
+    for q in keywords:
+        m = re.search(r"\b(?:in|near|around|at)\s+((?:[a-z]+\s?){1,3})$", q)
+        if not m:
+            continue
+        area = m.group(1).strip()
+        words = area.split()
+        if area in NOT_AREA or words[0] in NOT_AREA or words[0] in SOFT_WORDS or len(area) < 4:
+            continue
+        found.add(area)
+        if words[-1] in found and len(words) > 1 and " ".join(words[:-1]) not in NOT_AREA:
+            found.add(" ".join(words[:-1]))  # "salt lake kolkata" -> also "salt lake"
+    found = {a for a in found if split_glued(a, list(found)) == a}  # "behalakolkata" is a typo, not an area
+    return sorted(found, key=len, reverse=True)
+
+
+def local_area_tokens(rows: list[dict], location: str = "") -> list[str]:
+    """area_tokens() from a fan-out's rows: only local-angle queries are read, so 'pain in jaw' isn't an area.
+    (A row's "kind" comes from the angle the AI planned; older projects only have the built-in "Local" label.)"""
+    return area_tokens([r["keyword"] for r in rows if r.get("kind") == "local" or r.get("angle") == "Local"],
+                       location)
+
+
+def split_glued(q: str, places: list[str]) -> str:
+    """Fix words the AI glued together around a place name: 'ingaria' -> 'in garia' (when 'garia' is known),
+    'behalakolkata' -> 'behala kolkata'."""
+    single = {p for p in places if " " not in p and len(p) >= 4}
+    out = []
+    for w in q.split():
+        if len(w) >= 7:
+            for p in single:
+                if p == w:
+                    continue
+                if w.startswith("in") and w[2:] == p:
+                    w = f"in {p}"
+                    break
+                if w.startswith(p) and w[len(p):] in single:
+                    w = f"{p} {w[len(p):]}"
+                    break
+        out.append(w)
+    return " ".join(out)
 
 
 def prefix(q: str, n: int = 2) -> str:
@@ -160,6 +224,10 @@ def classify(q: str, angle: str, loc_tokens: list[str]) -> tuple[str, str]:
     compares = angle == "comparisons" and any(re.search(p, q) for p in COMPARE_PATTERNS)
     if not question and any(re.search(rf"\b{re.escape(w)}\b", q) for w in TRANSACTIONAL_WORDS):
         intent = "Transactional"
+    elif angle == "local" and not question:
+        # Local-angle queries are people choosing a provider in an area, even when the area isn't the
+        # location the user typed ("toothache urgent care in shyambazar", "best braces clinic in tollygunge").
+        intent = "Local"
     elif has_loc and angle in ("local", "services"):
         intent = "Local"
     elif any(w in words for w in COST_WORDS) or re.search(r"\b(vs|versus|best|top|review|reviews)\b", q) \

@@ -19,11 +19,10 @@ from planner.cluster import cluster_keywords, filter_keywords
 from planner.embed import FastEmbedder, OllamaEmbedder
 from planner.export import to_excel
 from planner.fanout import run_fanout
-from planner.llm import LLM, FallbackLLM, LLMError, ollama_running
+from planner.llm import LLM, FallbackLLM, LLMError, build_stage_models, ollama_running
 from planner.mapviz import map_html
 from planner.plan import build_content_plan
 from planner.project import filename, from_json, new_project, to_json
-from planner.prompts import ANGLES, default_instructions
 from planner.quota import Quota
 from planner.topicmap import all_clusters, build_topical_map
 
@@ -69,7 +68,6 @@ def theme_mode() -> str:
 
 ss = st.session_state
 ss.setdefault("project", None)
-ss.setdefault("instructions", default_instructions())
 ss.setdefault("notices", [])
 ss.setdefault("paid", set())  # projects (by created time) whose run already used a free run
 
@@ -118,21 +116,39 @@ with st.sidebar:
         if provider != "Local Ollama":
             fallback_local = st.checkbox("If the free limit is reached, continue on local Ollama", value=ollama_ok)
 
+    def cloud_keys() -> dict[str, str]:
+        """Keys per cloud provider. Online with a visitor's own key: only that key (the owner's keys stay unused)."""
+        if C.ONLINE and user_key:
+            return {provider: user_key}
+        keys = {}
+        for name in C.available_providers():
+            kn = C.PROVIDERS[name].key_name
+            k = (user_key if name == provider else None) or (secret(kn) if kn else None)
+            if kn and k:
+                keys[name] = k
+        return keys
+
+    per_stage_ok = bool(cloud_keys())
+    model_mode = st.radio(
+        "Models", ["A different model for each stage", "One model for everything"],
+        index=0 if per_stage_ok else 1, disabled=not per_stage_ok,
+        help="Each stage uses the model best suited to it (from the free model guide), and moves to its backups "
+             "when one runs out. Needs a Gemini, Groq or OpenRouter key." if per_stage_ok else
+             "Add a Gemini, Groq or OpenRouter key to use a different model for each stage.")
+    per_stage = per_stage_ok and model_mode.startswith("A different")
+    if per_stage:
+        with st.expander(":material/model_training: Models used in each stage"):
+            have = cloud_keys()
+            for stage, label in C.STAGES.items():
+                models = [m for pv, m in C.STAGE_MODELS[stage] if pv in have]
+                chain = " → ".join(f"`{m}`" for m in models) or f"_no key for its models: uses `{model}`_"
+                st.markdown(f"**{label}**  \n{chain}")
+            st.caption(f"After these, every stage can still use `{model}` (chosen above).")
+
     n_per_angle = st.slider("Queries per angle", 15, C.MAX_QUERIES_PER_ANGLE if not C.ONLINE else 40,
                             C.DEFAULT_QUERIES_PER_ANGLE, step=5,
-                            help="7 angles are asked separately. More queries = longer run.")
-
-    if not C.ONLINE:
-        with st.expander(":material/tune: Advanced: fan-out prompts"):
-            st.caption("What the AI is asked for each angle. Rules against repetition are always added.")
-            for key, a in ANGLES.items():
-                ss["instructions"][key] = st.text_area(a["label"], ss["instructions"][key], key=f"ins_{key}",
-                                                       height=90)
-            if st.button("Reset to defaults", icon=":material/restart_alt:"):
-                ss["instructions"] = default_instructions()
-                for key in ANGLES:
-                    ss.pop(f"ins_{key}", None)
-                st.rerun()
+                            help="The AI first studies the topic and chooses its search angles; each angle is then "
+                                 "asked separately. More queries = longer run.")
 
 
 def embedder_kind() -> str:
@@ -153,11 +169,13 @@ def build_llm(notice) -> FallbackLLM:
             other = C.PROVIDERS[name]
             if name != provider and other.key_name and secret(other.key_name):
                 chain.append(LLM(name, secret(f"{name.upper()}_MODEL") or other.default_model, secret(other.key_name)))
-    return FallbackLLM(chain, on_switch=notice)
+    default = FallbackLLM(chain, on_switch=notice)
+    return build_stage_models(cloud_keys(), default, notice) if per_stage else default
 
 
 def run_stage3(project: dict, rows: list[dict], llm, progress) -> None:
-    kept, removed = filter_keywords(rows, project["topic"])
+    progress("Stage 3 · removing generic terms", 0.02)
+    kept, removed = filter_keywords(rows, project["topic"], llm, project["location"])
     clusters = cluster_keywords(kept, get_embedder(embedder_kind()), llm, project["topic"], project["location"],
                                 progress)
     project["stage3"] = {"clusters": clusters, "filtered_out": removed}
@@ -229,7 +247,6 @@ if go:
                 st.write(f"AI: **{llm.label}** · embeddings: **{embedder_kind()}**")
                 share = 0.55 if full else 0.8
                 rows, report = run_fanout(llm, get_embedder(embedder_kind()), topic, location, n_per_angle,
-                                          ss["instructions"] if not C.ONLINE else None,
                                           progress=lambda m, f: bar.progress(min(f, 1.0) * share, text=m))
                 project["stage2"] = {"keywords": rows, "report": report}
                 stop = 0.7 if full else 1.0
@@ -385,14 +402,15 @@ if project and project.get("stage2"):
     with t_kw:
         st.caption("Edit, delete or add keywords, then rebuild the clusters. Intent decides which cluster group a "
                    "keyword can join.")
-        df = pd.DataFrame(s2["keywords"], columns=["keyword", "angle", "intent", "funnel"])
+        df = pd.DataFrame(s2["keywords"], columns=["keyword", "angle", "intent", "funnel", "kind"])
         edited = st.data_editor(
             df, num_rows="dynamic", use_container_width=True, hide_index=True, key="kw_editor",
             column_config={
                 "keyword": st.column_config.TextColumn("Keyword", required=True, width="large"),
                 "angle": st.column_config.TextColumn("Angle", disabled=True),
                 "intent": st.column_config.SelectboxColumn("Intent", options=list(Q.INTENTS), required=True),
-                "funnel": st.column_config.TextColumn("Funnel", disabled=True),
+                "funnel": st.column_config.SelectboxColumn("Funnel", options=["TOFU", "MOFU", "BOFU"]),
+                "kind": None,  # hidden: the angle's kind, kept for the area-name rules
             })
         if s6:
             st.caption(":material/info: Rebuilding clusters clears the topical map and content plan; build them "
@@ -405,8 +423,9 @@ if project and project.get("stage2"):
                     continue
                 seen.add(kw)
                 intent = r.get("intent") if r.get("intent") in Q.INTENTS else "Informational"
+                funnel = r.get("funnel") if r.get("funnel") in ("TOFU", "MOFU", "BOFU") else Q.FUNNEL[intent]
                 rows.append({"keyword": kw, "angle": r.get("angle") or "Added by you", "intent": intent,
-                             "funnel": Q.FUNNEL[intent]})
+                             "funnel": funnel, "kind": r.get("kind") or ""})
             try:
                 with st.spinner("Rebuilding clusters…"):
                     llm = build_llm(lambda msg: None) if (not p.key_name or user_key or owner_key) else None
@@ -418,7 +437,19 @@ if project and project.get("stage2"):
 
     with t_q:
         st.caption(f"Made with {rep.get('model', '')} · embeddings: {rep.get('embedder', '')} · "
-                   f"{rep.get('ai_calls', '?')} AI calls")
+                   f"{rep.get('ai_calls', '?')} AI calls in Stage 2 · intent and funnel tagged by AI for "
+                   f"{rep.get('tagged_by_ai', 0)} of {len(s2['keywords'])} keywords")
+        if rep.get("stage_models"):
+            with st.expander("Model used in each stage"):
+                st.dataframe(pd.DataFrame([{"Stage": C.STAGES.get(k, k), "Model": v}
+                                           for k, v in rep["stage_models"].items()]),
+                             hide_index=True, use_container_width=True)
+        if rep.get("angle_plan"):
+            st.markdown("**Angles** · " + ("chosen by the AI for this topic" if rep.get("angles_planned_by_ai")
+                                           else "the 7 standard angles"))
+            st.dataframe(pd.DataFrame(rep["angle_plan"]).rename(columns={
+                "label": "Angle", "kind": "Kind", "instruction": "What was asked"}),
+                hide_index=True, use_container_width=True)
         qa = pd.DataFrame([{
             "Angle": a.get("angle"), "Asked": a.get("asked"), "Kept": a.get("kept"),
             "Attempts": a.get("attempts", 0), "Repetitive removed": a.get("dropped_repetitive", 0),

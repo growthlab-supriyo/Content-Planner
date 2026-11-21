@@ -18,7 +18,7 @@ def test_parse_json_handles_fences_and_extra_text():
 
 def test_prompt_location_rules():
     p = prompts.build_prompt("local", "Dental Clinic", "Newtown", 20)
-    assert "Every query must mention Newtown" in p
+    assert "You may mention Newtown" in p and "it's not required" in p  # a place is optional
     p = prompts.build_prompt("questions", "Dental Clinic", "Newtown", 20)
     assert "do not add the location" in p
     p = prompts.build_prompt("local", "Wooden Wall Decor", "", 20)

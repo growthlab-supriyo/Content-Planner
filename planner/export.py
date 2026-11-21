@@ -93,9 +93,11 @@ def to_excel(project: dict, theme: str = "light") -> bytes:
     # ---- Tab 1 ----
     ws = wb.active
     ws.title = "Clusters & Keywords"
+    n_ai = s2.get("report", {}).get("tagged_by_ai", 0)
+    tags = (f"Intent and funnel stage: tagged by AI for {n_ai} of {len(info)} keywords, rules for the rest. "
+            if n_ai else "Intent and funnel stage are rule-based tags. ")
     _title(ws, "Clusters & Keywords", project,
-           f"Generated with {model}. Intent and funnel stage are rule-based tags. "
-           "'Used As' shows which page (Content #) each keyword is mapped to.")
+           f"Generated with {model}. {tags}'Used As' shows which page (Content #) each keyword is mapped to.")
     _header(ws, KW_HEADER_ROW, ["Pillar", "Cluster (Page)", "Keyword / Query", "Angle", "Intent", "Funnel Stage",
                                 "Used As", "Content #"], accent)
     r = KW_HEADER_ROW + 1

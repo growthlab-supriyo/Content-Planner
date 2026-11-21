@@ -7,8 +7,8 @@ map, content ideas across 22 content types, and keyword-to-page mapping.
 | Stage | What it does | Status |
 |---|---|---|
 | 1. Input | Topic (required) + location (optional) | Done |
-| 2. Query fan-out | 7 focused AI passes (services, problems & symptoms, costs, questions, comparisons, local, fears & myths) with quality checks | Done |
-| 3. Filter & cluster | Removes single words and generic two-word terms, then groups keywords into clusters (one theme and one intent each, no size limit) | Done |
+| 2. Query fan-out | The AI studies the topic and chooses its search angles (the 7 standard angles are the fallback), one focused pass per angle with quality checks, then the AI tags each keyword's intent and funnel stage | Done |
+| 3. Filter & cluster | Removes single words; the AI picks the two-word terms too generic to plan a page around. Then keywords are grouped into clusters (one theme and one intent each, no size limit) | Done |
 | 4. Topical map | Topic → Pillar → Cluster → Subtopic (H2s); gap check adds missing pages as "AI-suggested"; interactive map | Done |
 | 5. Content ideas | AI decides which of 23 content types are needed (Used / Skipped + reason), then 1–4 pieces per cluster plus a Pillar Page per pillar | Done |
 | 6. Keyword mapping | One primary keyword per page from its own cluster, never primary twice; up to 8 secondary; leftovers listed | Done |
@@ -22,8 +22,8 @@ one extra AI call; primary keywords are unique across the whole plan.
 - Each angle is asked separately, with its own instruction and examples from an unrelated business.
 - **Repetition cap:** no more than ~15% of an angle's queries may start with the same two words or with the topic name.
   If the AI repeats itself, it is asked again with feedback ("Too many queries started with …").
-- **On-angle check:** questions must be questions, comparisons must compare, costs must be about price, and local
-  queries must mention the area or "near me". If not, the angle is asked again.
+- **On-angle check:** questions must be questions, comparisons must compare and costs must be about price. If not, the
+  angle is asked again. Local queries may name an area or "near me", but don't have to.
 - **Near-duplicates** ("braces cost" / "braces price") are removed with embeddings.
 - The location is used only where it fits: local, and about a third of service and cost queries.
 - The **quality report** tab shows, per angle, how many queries were asked for, kept, removed as repetitive, and how
@@ -38,6 +38,15 @@ one extra AI call; primary keywords are unique across the whole plan.
 | Embeddings | `nomic-embed-text` through Ollama (fastembed if missing) | fastembed (`BAAI/bge-small-en-v1.5`) |
 | Prompt editor | Advanced panel in the sidebar | Hidden (tested defaults) |
 | Saving | Download Excel / project JSON, upload JSON to continue | Same |
+
+## A different model for each stage
+
+With a Gemini, Groq or OpenRouter key, each stage uses the free model best suited to it (from the free model
+reference guide), for example a strong Flash model to choose the angles, Flash-Lite for bulk intent tagging,
+GPT OSS 120B on Groq for pillars and content types, and Gemma or Qwen for H2s and headlines. Each stage has backups
+and moves to the next model when one hits its daily limit, doesn't exist for the key, or rejects the request.
+The lists are in `STAGE_MODELS` in `planner/config.py`; the sidebar shows them, and "One model for everything" turns
+it off. The quality report tab shows which model each stage ended up using.
 
 AI calls use plain HTTPS from the Python standard library (every provider accepts the OpenAI chat format), so there's
 no AI SDK to install.
