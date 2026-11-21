@@ -108,14 +108,54 @@ document.getElementById("subs").onchange = (e) => {{
   net.stabilize(250);
 }};
 document.getElementById("fit").onclick = () => net.fit({{animation: true}});
+// Download PNG: the whole map, redrawn at high resolution (not a copy of the screen, which is blurry when zoomed).
+// The map box is briefly enlarged so every node is drawn at PX_PER_UNIT pixels per map unit, then put back.
+const PX_PER_UNIT = 3, MAX_SIDE = 12000, MAX_AREA = 90e6;
 document.getElementById("png").onclick = () => {{
-  const src = document.querySelector("#net canvas");
-  const out = document.createElement("canvas");
-  out.width = src.width; out.height = src.height;
-  const ctx = out.getContext("2d");
-  ctx.fillStyle = "{c['bg']}"; ctx.fillRect(0, 0, out.width, out.height); ctx.drawImage(src, 0, 0);
-  const a = document.createElement("a");
-  a.download = "topical-map-{title.replace('"', '')}.png".replace(/\\s+/g, "-").toLowerCase();
-  a.href = out.toDataURL("image/png"); a.click();
+  const btn = document.getElementById("png"), box = document.getElementById("net");
+  const ids = nodes.getIds();
+  if (!ids.length) return;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const id of ids) {{
+    const b = net.getBoundingBox(id);
+    x0 = Math.min(x0, b.left); y0 = Math.min(y0, b.top); x1 = Math.max(x1, b.right); y1 = Math.max(y1, b.bottom);
+  }}
+  const pad = 40, bw = x1 - x0 + 2 * pad, bh = y1 - y0 + 2 * pad;
+  let px = PX_PER_UNIT;
+  px = Math.min(px, MAX_SIDE / bw, MAX_SIDE / bh, Math.sqrt(MAX_AREA / (bw * bh)));  // stay within browser limits
+  const dpr = window.devicePixelRatio || 1;
+  const old = {{w: box.style.width, h: box.style.height, view: net.getViewPosition(), scale: net.getScale()}};
+  btn.disabled = true; btn.textContent = "Preparing…";
+  box.style.width = (bw * px / dpr) + "px"; box.style.height = (bh * px / dpr) + "px";
+  net.setSize(box.style.width, box.style.height);
+  const capture = () => {{
+    const src = box.querySelector("canvas");
+    const out = document.createElement("canvas");
+    out.width = src.width; out.height = src.height;
+    const ctx = out.getContext("2d");
+    ctx.fillStyle = "{c['bg']}"; ctx.fillRect(0, 0, out.width, out.height); ctx.drawImage(src, 0, 0);
+    out.toBlob((blob) => {{
+      const a = document.createElement("a");
+      a.download = "topical-map-{title.replace('"', '')}.png".replace(/\\s+/g, "-").toLowerCase();
+      a.href = URL.createObjectURL(blob); a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      box.style.width = old.w; box.style.height = old.h;
+      net.setSize(old.w || "100%", old.h || "{height}px");
+      net.moveTo({{position: old.view, scale: old.scale}});
+      btn.disabled = false; btn.textContent = "Download PNG";
+    }}, "image/png");
+  }};
+  // vis-network resizes its canvas a moment later; wait until it has, then fit the whole map to the enlarged box.
+  // fit() never zooms past 1 unless told, hence maxZoomLevel. (Timers, not requestAnimationFrame: that pauses while
+  // the tab is in the background, and the download would hang.)
+  const want = Math.round(bw * px), started = Date.now();
+  const ready = () => {{
+    const cv = box.querySelector("canvas");
+    if (cv && Math.abs(cv.width - want) > 2 && Date.now() - started < 3000) return setTimeout(ready, 40);
+    net.fit({{animation: false, maxZoomLevel: 1000, minZoomLevel: 0.001}});
+    net.once("afterDrawing", capture);
+    net.redraw();  // draws straight away and fires afterDrawing
+  }};
+  setTimeout(ready, 40);
 }};
 </script></body></html>"""

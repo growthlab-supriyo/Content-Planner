@@ -207,3 +207,22 @@ def test_a_bare_list_answer_is_not_lost():
     assert get_list({"clusters": [1]}, "clusters") == [1]
     assert get_list({"pages": [1], "other": [2]}, "clusters") == []   # two lists: can't tell which one is meant
     assert get_list({"note": "x"}, "clusters") == []
+
+
+def test_a_rejected_key_is_not_tried_again_by_other_models(monkeypatch):
+    calls = []
+
+    def fake_post(url, payload, key, timeout):
+        calls.append(payload["model"])
+        raise L.HTTPError(401, "Invalid API Key")
+
+    monkeypatch.setattr(L, "post_json", fake_post)
+    L.LLM._rejected_keys.clear()
+    big = L.LLM("Groq", "openai/gpt-oss-120b", "bad-key", backups=False, min_interval=0)
+    small = L.LLM("Groq", "openai/gpt-oss-20b", "bad-key", backups=False, min_interval=0)
+    with pytest.raises(ModelUnavailable):
+        big.json("s", "u")
+    with pytest.raises(ModelUnavailable):
+        small.json("s", "u")
+    assert calls == ["openai/gpt-oss-120b"] and small.exhausted   # the second model never called Groq
+    L.LLM._rejected_keys.clear()

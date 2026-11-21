@@ -45,7 +45,8 @@ def secret(name: str) -> str | None:
         v = st.secrets.get(name)
     except Exception:  # no secrets.toml
         v = None
-    return v or os.environ.get(name) or None
+    v = str(v or os.environ.get(name) or "").strip().strip('"').strip()  # pasted keys often carry spaces or quotes
+    return v or None
 
 
 def visitor_ip() -> str | None:
@@ -246,11 +247,9 @@ if go:
         try:
             with st.status("Building your content plan…", expanded=True) as status:
                 bar = st.progress(0.0, text="Starting")
-                note = st.empty()
 
-                def notice(msg):
+                def notice(msg):  # model switches are normal: recorded for the Quality report, not shown as warnings
                     ss["notices"].append(msg)
-                    note.warning(msg)
 
                 llm = build_llm(notice)
                 st.write(f"AI: **{llm.label}** · embeddings: **{embedder_kind()}**")
@@ -284,8 +283,6 @@ if project and project.get("stage2"):
     st.divider()
     loc = f" · {project['location']}" if project.get("location") else ""
     st.subheader(f"{project['topic']}{loc}")
-    for n in ss.get("notices", []):
-        st.warning(n)
 
     s4, s5, s6 = project.get("stage4"), project.get("stage5"), project.get("stage6")
     clusters = s3["clusters"]
@@ -318,7 +315,7 @@ if project and project.get("stage2"):
                     try:
                         with st.status("Building topical map and content plan…", expanded=True) as status:
                             bar = st.progress(0.0, text="Starting")
-                            run_stages_456(project, build_llm(lambda msg: st.warning(msg)),
+                            run_stages_456(project, build_llm(lambda msg: ss["notices"].append(msg)),
                                            lambda m_, f: bar.progress(min(f, 1.0), text=m_))
                             status.update(label="Content plan ready", state="complete", expanded=False)
                         st.rerun()
@@ -446,6 +443,11 @@ if project and project.get("stage2"):
         st.caption(f"Made with {rep.get('model', '')} · embeddings: {rep.get('embedder', '')} · "
                    f"{rep.get('ai_calls', '?')} AI calls in Stage 2 · intent and funnel tagged by AI for "
                    f"{rep.get('tagged_by_ai', 0)} of {len(s2['keywords'])} keywords")
+        if ss.get("notices"):
+            with st.expander(f"Model switches during this run ({len(ss['notices'])})"):
+                st.caption("A stage moves to its next model when one hits a free limit, doesn't exist for the key, or "
+                           "its key isn't accepted. The plan is still complete.")
+                st.markdown("\n".join(f"- {n}" for n in ss["notices"]))
         if rep.get("stage_models"):
             with st.expander("Model used in each stage"):
                 st.dataframe(pd.DataFrame([{"Stage": C.STAGES.get(k, k), "Model": v}

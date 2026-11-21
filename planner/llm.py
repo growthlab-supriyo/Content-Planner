@@ -145,7 +145,14 @@ class LLM:
     def label(self) -> str:
         return f"{self.provider} · {self.model}"
 
+    # (provider, key) pairs the provider refused in this process: every model on that key is skipped at once,
+    # instead of each stage trying it again (seen online: a wrong Groq key was tried by every stage).
+    _rejected_keys: set[tuple[str, str]] = set()
+
     def json(self, system: str, user: str, temperature: float = 0.7) -> dict:
+        if self._key and (self.provider, self._key) in LLM._rejected_keys:
+            self.exhausted = True
+            raise ModelUnavailable(f"{self.provider} did not accept the API key.")
         for attempt in range(4):
             # Some models (Gemma) take no system message: then it goes at the top of the user message.
             if self._system_ok:
@@ -209,8 +216,13 @@ class LLM:
                         self._thinking = False
                         continue
                     raise ModelUnavailable(f"{self.label} rejected the request: {_short(e)}") from None
-                if e.status in (401, 403):
+                if e.status == 401 or (e.status == 403 and re.search(r"key|auth|credential", e.message, re.I)):
+                    if self._key:
+                        LLM._rejected_keys.add((self.provider, self._key))
+                    self.exhausted = True
                     raise ModelUnavailable(f"{self.provider} did not accept the API key.") from None
+                if e.status == 403:  # this key may not use this model (e.g. a gated model): try the next one
+                    raise ModelUnavailable(f"{self.label} isn't allowed for this key: {_short(e)}") from None
                 if e.status == 404:
                     if self._next_model():
                         return self.json(system, user, temperature)
