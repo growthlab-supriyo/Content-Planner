@@ -76,74 +76,76 @@ with st.sidebar:
     st.markdown(f"### :material/hub: {C.APP_NAME}")
     st.caption("Online version · free cloud AI" if C.ONLINE else "Local version · runs on this computer")
 
-    providers = C.available_providers()
-    provider = st.selectbox("AI provider", providers, index=providers.index(C.DEFAULT_PROVIDER))
-    p = C.PROVIDERS[provider]
-    model = st.text_input("Model", value=secret(f"{(p.key_name or 'OLLAMA').split('_')[0]}_MODEL") or p.default_model,
-                          key=f"model_{provider}", help="Free model names change now and then; you can type another.")
-
-    owner_key = secret(p.key_name) if p.key_name else None
-    user_key = None
     quota = get_quota()
     vid = Quota.visitor_id(visitor_ip())
-    if p.key_name:
-        if C.ONLINE:
-            user_key = st.text_input("Your own API key (optional)", type="password", help=p.key_help,
-                                     key=f"key_{provider}") or None
-            if user_key:
-                st.caption(":material/key: Using your key: no daily limit here. It's kept only for this session.")
-            elif owner_key:
-                left = quota.remaining(vid)
-                st.caption(f":material/bolt: Free runs left today: **{left} of {C.FREE_RUNS_PER_DAY}**")
-                if left == 0:
-                    st.info(f"Add your own free key to keep going. {p.key_help}")
-            else:
-                st.warning(f"Add your free {provider} key to run. {p.key_help}")
-        else:
-            user_key = st.text_input(f"{provider} API key", type="password", value=owner_key or "",
-                                     help=f"{p.key_help}. Or save it as {p.key_name} in .streamlit/secrets.toml",
-                                     key=f"key_{provider}") or None
+    cloud = [n for n in C.available_providers() if C.PROVIDERS[n].key_name]  # Gemini, Groq, OpenRouter
 
-    ollama_ok, ollama_models = (False, []) if C.ONLINE else ollama_running()
-    fallback_local = False
-    if not C.ONLINE:
-        if ollama_ok:
-            st.caption(f":material/check_circle: Ollama is running ({len(ollama_models)} models)")
-            if provider == "Local Ollama" and not any(m.split(":")[0] == model.split(":")[0] for m in ollama_models):
-                st.warning(f"Model '{model}' isn't installed. Run: `ollama pull {model}`")
-        else:
-            st.caption(":material/error: Ollama isn't running. Start it, or use a cloud provider.")
-        if provider != "Local Ollama":
-            fallback_local = st.checkbox("If the free limit is reached, continue on local Ollama", value=ollama_ok)
+    # Visitors' own keys: one box per provider, folded away. Locally, keys saved in secrets.toml are used anyway.
+    user_keys: dict[str, str] = {}
+    with st.expander(":material/key: Use your own API keys"):
+        st.caption("Optional. With your own keys there's no daily limit; they're kept only for this session. "
+                   "Add any or all: the planner uses whichever you add." if C.ONLINE else
+                   "Keys saved in .streamlit/secrets.toml are used automatically. Type one here to use a different "
+                   "key in this session.")
+        for name in cloud:
+            k = st.text_input(f"{name} API key", type="password", key=f"key_{name}",
+                              help=C.PROVIDERS[name].key_help) or ""
+            if k.strip():
+                user_keys[name] = k.strip()
+    using_own = bool(user_keys)
 
-    def cloud_keys() -> dict[str, str]:
-        """Keys per cloud provider. Online with a visitor's own key: only that key (the owner's keys stay unused)."""
-        if C.ONLINE and user_key:
-            return {provider: user_key}
-        keys = {}
-        for name in C.available_providers():
-            kn = C.PROVIDERS[name].key_name
-            k = (user_key if name == provider else None) or (secret(kn) if kn else None)
-            if kn and k:
-                keys[name] = k
+    def active_keys() -> dict[str, str]:
+        """Keys this run uses. Online with a visitor's own keys: only theirs (the owner's keys stay unused)."""
+        if C.ONLINE and using_own:
+            return dict(user_keys)
+        keys = {n: secret(C.PROVIDERS[n].key_name) for n in cloud}
+        keys = {n: k for n, k in keys.items() if k}
+        keys.update(user_keys)
         return keys
 
-    per_stage_ok = bool(cloud_keys())
+    if C.ONLINE:
+        if using_own:
+            st.caption(":material/key: Using your keys: no daily limit here.")
+        elif active_keys():
+            left = quota.remaining(vid)
+            st.caption(f":material/bolt: Free runs left today: **{left} of {C.FREE_RUNS_PER_DAY}**")
+            if left == 0:
+                st.info("Add your own free key under 'Use your own API keys' to keep going.")
+        else:
+            st.warning("Add a free Gemini, Groq or OpenRouter key under 'Use your own API keys' to run.")
+
+    ollama_ok, ollama_models = (False, []) if C.ONLINE else ollama_running()
+    if not C.ONLINE:
+        st.caption(f":material/check_circle: Ollama is running ({len(ollama_models)} models)" if ollama_ok else
+                   ":material/error: Ollama isn't running (only needed for the local model).")
+
+    have = active_keys()
+    singles = [m for m in C.SINGLE_MODELS if m[0] in have or (m[0] == "Local Ollama" and not C.ONLINE)]
     model_mode = st.radio(
         "Models", ["A different model for each stage", "One model for everything"],
-        index=0 if per_stage_ok else 1, disabled=not per_stage_ok,
-        help="Each stage uses the model best suited to it (from the free model guide), and moves to its backups "
-             "when one runs out. Needs a Gemini, Groq or OpenRouter key." if per_stage_ok else
-             "Add a Gemini, Groq or OpenRouter key to use a different model for each stage.")
-    per_stage = per_stage_ok and model_mode.startswith("A different")
+        index=0 if have else 1, disabled=not have,
+        help="A different model for each stage: each step uses the free model that does it best, and moves to its "
+             "backups when one runs out. One model for everything: you pick the model, and every step uses it."
+        if have else "Add a Gemini, Groq or OpenRouter key to use a different model for each stage.")
+    per_stage = bool(have) and model_mode.startswith("A different")
+    single = None
     if per_stage:
+        st.caption(C.PER_STAGE_EFFECT)
         with st.expander(":material/model_training: Models used in each stage"):
-            have = cloud_keys()
             for stage, label in C.STAGES.items():
                 models = [m for pv, m in C.STAGE_MODELS[stage] if pv in have]
-                chain = " → ".join(f"`{m}`" for m in models) or f"_no key for its models: uses `{model}`_"
-                st.markdown(f"**{label}**  \n{chain}")
-            st.caption(f"After these, every stage can still use `{model}` (chosen above).")
+                st.markdown(f"**{label}**  \n" + " → ".join(f"`{m}`" for m in models))
+            st.caption("Each stage moves to the next model when one hits its free limit or isn't available.")
+    else:
+        labels = [m[2] for m in singles]
+        pick = st.selectbox("Model for every stage", labels, index=0,
+                            help="Every step (angles, queries, tagging, clusters, pillars, H2s, titles) uses this "
+                                 "model. If it hits its free limit, the run moves to your other keys' models.")
+        single = next(m for m in singles if m[2] == pick)
+        st.caption(f"**What changes:** {single[3]}")
+        if single[0] == "Local Ollama" and ollama_ok and not any(
+                x.split(":")[0] == single[1].split(":")[0] for x in ollama_models):
+            st.warning(f"Model '{single[1]}' isn't installed. Run: `ollama pull {single[1]}`")
 
     n_per_angle = st.slider("Queries per angle", 15, C.MAX_QUERIES_PER_ANGLE if not C.ONLINE else 40,
                             C.DEFAULT_QUERIES_PER_ANGLE, step=5,
@@ -159,18 +161,27 @@ def embedder_kind() -> str:
     return "fastembed"
 
 
-def build_llm(notice) -> FallbackLLM:
-    key = user_key or owner_key
-    chain = [LLM(provider, model, key)]
-    if fallback_local and ollama_ok:
-        chain.append(LLM("Local Ollama", C.PROVIDERS["Local Ollama"].default_model))
-    if C.ONLINE and not user_key:  # owner's other free keys as backup
-        for name in C.available_providers():
-            other = C.PROVIDERS[name]
-            if name != provider and other.key_name and secret(other.key_name):
-                chain.append(LLM(name, secret(f"{name.upper()}_MODEL") or other.default_model, secret(other.key_name)))
-    default = FallbackLLM(chain, on_switch=notice)
-    return build_stage_models(cloud_keys(), default, notice) if per_stage else default
+def setup_problem() -> str | None:
+    """Why a run can't start with the current settings (None when it can)."""
+    if single and single[0] == "Local Ollama":
+        return None if ollama_ok else "Ollama isn't running. Start the Ollama app, or choose a cloud model."
+    if not have:
+        return ("Add a free Gemini, Groq or OpenRouter key under 'Use your own API keys' in the sidebar."
+                if C.ONLINE else "Add a Gemini, Groq or OpenRouter key, or start Ollama and choose the local model.")
+    return None
+
+
+def build_llm(notice):
+    """The chosen model (or the per-stage chains), with every other model we have a key for as backup, so a run
+    still finishes when one free limit is reached. Locally, Ollama is the last backup when it's running."""
+    backups = [LLM(n, C.PROVIDERS[n].default_model, k) for n, k in have.items()]
+    if not C.ONLINE and ollama_ok:
+        backups.append(LLM("Local Ollama", C.PROVIDERS["Local Ollama"].default_model))
+    if per_stage:
+        return build_stage_models(have, FallbackLLM(backups, on_switch=notice), notice)
+    first = LLM(single[0], single[1], have.get(single[0]))
+    rest = [b for b in backups if (b.provider, b.model) != (first.provider, first.model)]
+    return FallbackLLM([first] + rest, on_switch=notice)
 
 
 def run_stage3(project: dict, rows: list[dict], llm, progress) -> None:
@@ -220,13 +231,11 @@ if go:
         problem = "Enter a service, category or topic first."
     elif len(topic) > 80 or len(location) > 80:
         problem = "Keep the topic and location under 80 characters."
-    elif p.key_name and not (user_key or owner_key):
-        problem = f"{provider} needs an API key. {p.key_help}"
-    elif provider == "Local Ollama" and not ollama_ok:
-        problem = "Ollama isn't running. Start the Ollama app, then try again."
-    elif C.ONLINE and not user_key and not quota.use(vid):
-        problem = (f"You've used today's {C.FREE_RUNS_PER_DAY} free runs. Add your own free key in the sidebar "
-                   f"to keep going. {p.key_help}")
+    elif setup_problem():
+        problem = setup_problem()
+    elif C.ONLINE and not using_own and not quota.use(vid):
+        problem = (f"You've used today's {C.FREE_RUNS_PER_DAY} free runs. Add your own free key under 'Use your "
+                   f"own API keys' in the sidebar to keep going.")
     if problem:
         st.error(problem)
     else:
@@ -260,7 +269,7 @@ if go:
                               expanded=False)
         except LLMError as e:
             st.error(str(e))
-            if C.ONLINE and not user_key and not project.get("stage2"):
+            if C.ONLINE and not using_own and not project.get("stage2"):
                 quota.refund(vid)  # nothing was made, so the free run isn't counted
                 ss["paid"].discard(project["created"])
                 st.caption("This run didn't count towards your free runs.")
@@ -294,12 +303,10 @@ if project and project.get("stage2"):
             st.caption("Groups the clusters into pillars, adds missing pages, picks content types and maps every "
                        "keyword to a page. On a local model this takes several minutes.")
             if st.button("Build topical map and content plan", type="primary", icon=":material/account_tree:"):
-                problem = None
-                if p.key_name and not (user_key or owner_key):
-                    problem = f"{provider} needs an API key. {p.key_help}"
-                elif provider == "Local Ollama" and not ollama_ok:
-                    problem = "Ollama isn't running. Start the Ollama app, then try again."
-                elif C.ONLINE and not user_key and project["created"] not in ss["paid"]:
+                problem = setup_problem()
+                if problem:
+                    pass
+                elif C.ONLINE and not using_own and project["created"] not in ss["paid"]:
                     if quota.use(vid):
                         ss["paid"].add(project["created"])
                     else:
@@ -428,7 +435,7 @@ if project and project.get("stage2"):
                              "funnel": funnel, "kind": r.get("kind") or ""})
             try:
                 with st.spinner("Rebuilding clusters…"):
-                    llm = build_llm(lambda msg: None) if (not p.key_name or user_key or owner_key) else None
+                    llm = build_llm(lambda msg: None) if not setup_problem() else None
                     s2["keywords"] = rows
                     run_stage3(project, rows, llm, lambda m, f: None)
                 st.rerun()

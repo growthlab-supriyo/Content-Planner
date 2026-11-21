@@ -16,17 +16,30 @@ def _run(online):
     return at
 
 
+def _one_model(at):
+    """Switch the sidebar to 'One model for everything' (if keys allow the per-stage choice) and rerun."""
+    radio = at.sidebar.radio[0]
+    if radio.value != "One model for everything" and not radio.disabled:
+        radio.set_value("One model for everything").run()
+    return at
+
+
 def test_local_app_starts():
-    at = _run(False)
+    at = _one_model(_run(False))
     assert not at.exception
-    assert "Local Ollama" in at.sidebar.selectbox[0].options
+    assert any("Ollama" in o for o in at.sidebar.selectbox[0].options)
 
 
-def test_online_app_hides_ollama_and_prompt_editor():
-    at = _run(True)
+def test_online_app_hides_ollama_and_shows_three_key_boxes(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")  # an owner key, so a model can be chosen
+    at = _one_model(_run(True))
     assert not at.exception
-    assert "Local Ollama" not in at.sidebar.selectbox[0].options
+    assert not any("Ollama" in o for o in at.sidebar.selectbox[0].options)
+    assert not any(s.label in ("AI provider", "Model") for s in at.sidebar.selectbox)  # no provider/model boxes
+    assert [t.label for t in at.sidebar.text_input] == ["Gemini API key", "Groq API key", "OpenRouter API key"]
+    assert any("Use your own API keys" in e.label for e in at.sidebar.expander)
     assert not any("fan-out prompts" in e.label for e in at.sidebar.expander)
+    assert any("What changes" in c.value for c in at.sidebar.caption)  # the single model's effect is explained
     os.environ.pop("CP_ONLINE", None)
 
 

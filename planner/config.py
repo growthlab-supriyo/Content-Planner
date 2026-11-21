@@ -91,6 +91,36 @@ STAGE_MODELS: dict[str, list[tuple[str, str]]] = {
 }
 
 
+# "One model for everything": the choices offered, with what using only that model means for the plan.
+# (provider, model, label, effect). Only models whose provider has a key (or Ollama, locally) are shown.
+SINGLE_MODELS: list[tuple[str, str, str, str]] = [
+    ("Groq", "openai/gpt-oss-120b", "GPT OSS 120B · Groq",
+     "Close to the per-stage plan: strong angles, pillars and content choices, and fast (about 3 minutes). Groq's "
+     "free daily token limit covers only about 2–3 full plans, then the run moves to your other keys. Bulk steps "
+     "(tagging, cluster names, H2s, titles) use a big model where a lighter one would do, so it uses that limit up "
+     "faster than the per-stage setup."),
+    ("Gemini", "gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite",
+     "Fast, with a high daily limit (about 10 full plans a day). H2s and titles are as good as per stage, but the "
+     "angles, pillars and content-type choices are less sharp: expect more generic angles and more pages placed "
+     "in a pillar where they don't quite fit."),
+    ("Gemini", "gemini-3.8-flash", "Gemini 3.8 Flash",
+     "Google's strongest free research model, but it allows only about 5 calls a minute and 20 a day. A full plan "
+     "needs about 50 calls, so the run is slow (10+ minutes) and moves to backup models part-way through."),
+    ("OpenRouter", "nvidia/nemotron-3-ultra-550b-a55b:free", "Nemotron 3 Ultra · OpenRouter",
+     "A very strong reasoner, but OpenRouter's free models share about 50 calls a day: roughly one plan a day, "
+     "and slower answers."),
+    ("Local Ollama", "qwen2.5:7b", "Qwen 2.5 7B · this computer (Ollama)",
+     "Private and unlimited, but a small model on a laptop: about 30 minutes a plan, and weaker angles, cluster "
+     "names, pillars and titles than the cloud models."),
+]
+
+PER_STAGE_EFFECT = (
+    "Each step uses the model that did best at it in testing: GPT OSS 120B (Groq) chooses the angles, writes the "
+    "queries and builds the pillars; GPT OSS 20B (Groq) tags intent and funnel; Gemini Flash-Lite names clusters "
+    "and writes H2s and titles. A full plan took under 3 minutes with about 50 AI calls, and the work is spread "
+    "over several free limits, so more plans fit in a day.")
+
+
 def min_interval_for(provider: str, model: str) -> float:
     """Seconds between calls to stay under each model's free per-minute limit."""
     m = model.lower()
