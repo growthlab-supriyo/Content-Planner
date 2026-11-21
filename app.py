@@ -104,14 +104,25 @@ with st.sidebar:
         keys.update(user_keys)
         return keys
 
+    runs_box = None
+
+    def show_runs_left() -> None:
+        """The free-runs counter. The sidebar is drawn before a run starts, so this is called again right after a
+        run is counted (or refunded); otherwise the count only changed on the next click."""
+        if runs_box is None:
+            return
+        left = quota.remaining(vid)
+        with runs_box.container():
+            st.caption(f":material/bolt: Free runs left today: **{left} of {C.FREE_RUNS_PER_DAY}**")
+            if left == 0:
+                st.info("Add your own free key under 'Use your own API keys' to keep going.")
+
     if C.ONLINE:
         if using_own:
             st.caption(":material/key: Using your keys: no daily limit here.")
         elif active_keys():
-            left = quota.remaining(vid)
-            st.caption(f":material/bolt: Free runs left today: **{left} of {C.FREE_RUNS_PER_DAY}**")
-            if left == 0:
-                st.info("Add your own free key under 'Use your own API keys' to keep going.")
+            runs_box = st.empty()  # refreshed the moment a run is counted or refunded (see show_runs_left)
+            show_runs_left()
         else:
             st.warning("Add a free Gemini, Groq or OpenRouter key under 'Use your own API keys' to run.")
 
@@ -237,6 +248,7 @@ if go:
     elif C.ONLINE and not using_own and not quota.use(vid):
         problem = (f"You've used today's {C.FREE_RUNS_PER_DAY} free runs. Add your own free key under 'Use your "
                    f"own API keys' in the sidebar to keep going.")
+    show_runs_left()  # the run was just counted (or the limit reached): update the sidebar now
     if problem:
         st.error(problem)
     else:
@@ -271,6 +283,7 @@ if go:
             if C.ONLINE and not using_own and not project.get("stage2"):
                 quota.refund(vid)  # nothing was made, so the free run isn't counted
                 ss["paid"].discard(project["created"])
+                show_runs_left()
                 st.caption("This run didn't count towards your free runs.")
         finally:
             ss["notices"] += [n for n in getattr(llm, "notes", []) if n not in ss["notices"]]
@@ -306,6 +319,7 @@ if project and project.get("stage2"):
                 elif C.ONLINE and not using_own and project["created"] not in ss["paid"]:
                     if quota.use(vid):
                         ss["paid"].add(project["created"])
+                        show_runs_left()
                     else:
                         problem = (f"You've used today's {C.FREE_RUNS_PER_DAY} free runs. Add your own free key in "
                                    f"the sidebar to keep going.")
@@ -450,8 +464,8 @@ if project and project.get("stage2"):
                 st.markdown("\n".join(f"- {n}" for n in ss["notices"]))
         if rep.get("stage_models"):
             with st.expander("Model used in each stage"):
-                st.dataframe(pd.DataFrame([{"Stage": C.STAGES.get(k, k), "Model": v}
-                                           for k, v in rep["stage_models"].items()]),
+                st.dataframe(pd.DataFrame([{"Stage": label, "Model": rep["stage_models"][k]}  # in stage order
+                                           for k, label in C.STAGES.items() if k in rep["stage_models"]]),
                              hide_index=True, use_container_width=True)
         if rep.get("angle_plan"):
             st.markdown("**Angles** · " + ("chosen by the AI for this topic" if rep.get("angles_planned_by_ai")

@@ -202,6 +202,12 @@ class LLM:
                         continue
                     self.exhausted = daily
                     raise RateLimited(f"{self.label} free limit reached: {_short(e)}") from None
+                if e.status == 400 and re.search(r"api key|api_key", e.message, re.I):
+                    # Gemini answers a bad key with 400 ("Please pass a valid API key"), not 401
+                    if self._key:
+                        LLM._rejected_keys.add((self.provider, self._key))
+                    self.exhausted = True
+                    raise ModelUnavailable(f"{self.provider} did not accept the API key.") from None
                 if e.status == 400:  # an option this model doesn't take: drop options one by one
                     if self._thinking and "reason" in e.message.lower():
                         self._thinking = False

@@ -226,3 +226,19 @@ def test_a_rejected_key_is_not_tried_again_by_other_models(monkeypatch):
         small.json("s", "u")
     assert calls == ["openai/gpt-oss-120b"] and small.exhausted   # the second model never called Groq
     L.LLM._rejected_keys.clear()
+
+
+def test_gemini_bad_key_400_counts_as_a_rejected_key(monkeypatch):
+    calls = []
+
+    def fake_post(url, payload, key, timeout):
+        calls.append(payload["model"])
+        raise L.HTTPError(400, "API key not valid. Please pass a valid API key.")
+
+    monkeypatch.setattr(L, "post_json", fake_post)
+    L.LLM._rejected_keys.clear()
+    for m in ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite"):
+        with pytest.raises(ModelUnavailable, match="did not accept the API key"):
+            L.LLM("Gemini", m, "bad", backups=False, min_interval=0).json("s", "u")
+    assert calls == ["gemini-3.5-flash-lite"]
+    L.LLM._rejected_keys.clear()
