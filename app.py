@@ -22,7 +22,7 @@ from planner.fanout import run_fanout
 from planner.llm import LLM, FallbackLLM, LLMError, build_stage_models, ollama_running
 from planner.mapviz import map_html
 from planner.plan import build_content_plan
-from planner.project import filename, from_json, new_project, to_json
+from planner.project import filename, new_project
 from planner.quota import Quota
 from planner.topicmap import all_clusters, build_topical_map
 
@@ -218,24 +218,13 @@ st.title("Content planner")
 st.caption("Type a service, category or topic. The planner finds the searches around it, removes the noise and "
            "groups them into clusters. Each cluster becomes one page.")
 
-tab_new, tab_open = st.tabs([":material/add: New plan", ":material/upload: Continue a saved project"])
-with tab_new:
-    with st.form("input"):
-        c1, c2 = st.columns([3, 2])
-        topic = c1.text_input("Service / category / topic", placeholder="Dental clinic")
-        location = c2.text_input("Location (optional)", placeholder="Newtown, Kolkata")
-        full = st.checkbox("Also build the topical map, content plan and keyword mapping (Stages 4–6)", value=True,
-                           help="Turn off to check the keyword clusters first; you can build the rest later.")
-        go = st.form_submit_button("Build content plan", type="primary", icon=":material/play_arrow:")
-
-with tab_open:
-    up = st.file_uploader("Project file (.json) downloaded from this app", type=["json"])
-    if up is not None and st.button("Open project", icon=":material/folder_open:"):
-        try:
-            ss["project"] = from_json(up.getvalue())
-            st.success(f"Opened: {ss['project']['topic']}")
-        except ValueError as e:
-            st.error(str(e))
+with st.form("input"):
+    c1, c2 = st.columns([3, 2])
+    topic = c1.text_input("Service / category / topic", placeholder="Dental clinic")
+    location = c2.text_input("Location (optional)", placeholder="Newtown, Kolkata")
+    full = st.checkbox("Also build the topical map, content plan and keyword mapping (Stages 4–6)", value=True,
+                       help="Turn off to check the keyword clusters first; you can build the rest later.")
+    go = st.form_submit_button("Build content plan", type="primary", icon=":material/play_arrow:")
 
 if go:
     problem = None
@@ -336,12 +325,9 @@ if project and project.get("stage2"):
                     except LLMError as e:
                         st.error(str(e))
 
-    d1, d2, _ = st.columns([1, 1, 3])
+    d1, _ = st.columns([1, 4])
     d1.download_button("Download Excel", to_excel(project, theme_mode()), filename(project, "xlsx"),
                        icon=":material/download:", type="primary", use_container_width=True)
-    d2.download_button("Save project (.json)", to_json(project), filename(project, "json"),
-                       icon=":material/save:", use_container_width=True,
-                       help="Upload this file later under 'Continue a saved project'.")
 
     t_map, t_plan, t_cl, t_kw, t_types, t_q, t_f = st.tabs([
         ":material/account_tree: Topical map", ":material/calendar_month: Content plan",

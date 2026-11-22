@@ -37,7 +37,7 @@ one extra AI call; primary keywords are unique across the whole plan.
 | Keys | `.streamlit/secrets.toml` or typed in the sidebar | Owner's key: 3 free runs per visitor per day, then the visitor's own key |
 | Embeddings | `nomic-embed-text` through Ollama (fastembed if missing) | fastembed (`BAAI/bge-small-en-v1.5`) |
 | Prompt editor | Advanced panel in the sidebar | Hidden (tested defaults) |
-| Saving | Download Excel / project JSON, upload JSON to continue | Same |
+| Saving | Download Excel | Same |
 
 ## A different model for each stage
 
