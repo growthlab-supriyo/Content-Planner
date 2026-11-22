@@ -228,9 +228,9 @@ with st.form("input"):
                              "pages; traffic → questions and guides.")
     c3, c4 = st.columns(2)
     offerings = c3.text_area("Services or products you offer (optional)", placeholder=B.EXAMPLES["offerings"],
-                             height=120, help="The plan covers only what you offer, and pillars follow these lines.")
+                             height=165, help="The plan covers only what you offer, and pillars follow these lines.")
     customers = c4.text_area("Who your customers are (optional)", placeholder=B.EXAMPLES["customers"],
-                             height=120, help="Angles and searches are written from these customers' point of view.")
+                             height=165, help="Angles and searches are written from these customers' point of view.")
     plan_for = st.text_input("Who the plan is for (optional)", placeholder=B.EXAMPLES["plan_for"],
                              help="For a client, titles avoid first-person claims like 'our clinic'.")
     full = st.checkbox("Also build the topical map, content plan and keyword mapping (Stages 4–6)", value=True,

@@ -54,8 +54,8 @@ def test_goal_must_be_chosen_and_examples_show_in_empty_fields():
     goal = next(s for s in at.selectbox if s.label == "Main goal of the content")
     assert goal.value is None and "Get enquiries and bookings" in goal.options
     areas = {t.label: t for t in at.text_area}
-    assert "Dental clinic:" in areas["Services or products you offer (optional)"].placeholder
-    assert "Travel agency:" in areas["Who your customers are (optional)"].placeholder
+    assert "Dental:" in areas["Services or products you offer (optional)"].placeholder
+    assert "Travel:" in areas["Who your customers are (optional)"].placeholder
     at.text_input[0].set_value("dental clinic")
     at.button[0].click().run()
     assert any("Choose the main goal" in e.value for e in at.error)

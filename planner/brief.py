@@ -23,19 +23,18 @@ GOALS: dict[str, str] = {
 }
 
 # Grey examples shown inside the empty fields (they disappear as soon as the user types)
-EXAMPLES = {
-    "topic": "e.g. Travel agency · Personalised gifts · Dental clinic · Coaching institute",
-    "location": "e.g. Kolkata · Newtown, Kolkata · (empty if you sell online across India)",
-    "offerings": ("Travel agency: Kashmir, Kerala and Goa packages, honeymoon tours, visa help\n"
-                  "Gift shop: personalised mugs and frames, gift hampers, corporate gifts\n"
-                  "Dental clinic: root canal, implants, braces, kids' dentistry\n"
-                  "Institute: JEE and NEET coaching, foundation courses, spoken English"),
-    "customers": ("Travel agency: families, honeymoon couples, senior citizens\n"
-                  "Gift shop: people buying for a partner or parents, companies buying in bulk\n"
-                  "Dental clinic: families with children, working adults, seniors\n"
-                  "Institute: students in classes 8–12 and their parents"),
-    "plan_for": ("e.g. My own travel agency · My gift shop · A dental clinic, my client (I'm an agency) · "
-                 "A coaching institute I work for"),
+EXAMPLES = {  # short enough to show in full in their boxes
+    "topic": "e.g. Travel agency · Gifts · Dental clinic · Institute",
+    "location": "e.g. Kolkata · Newtown, Kolkata",
+    "offerings": ("Travel: Kashmir & Goa packages, honeymoon tours\n"
+                  "Gifts: personalised mugs, hampers, corporate gifts\n"
+                  "Dental: root canal, implants, braces\n"
+                  "Institute: JEE & NEET coaching, spoken English"),
+    "customers": ("Travel: families, honeymoon couples, seniors\n"
+                  "Gifts: buyers for partner or parents, companies\n"
+                  "Dental: families, working adults, seniors\n"
+                  "Institute: students in classes 8–12, parents"),
+    "plan_for": "e.g. My own business · A client (I'm an agency) · My blog",
 }
 
 FIELDS = ("goal", "offerings", "customers", "plan_for")
