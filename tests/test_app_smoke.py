@@ -54,11 +54,20 @@ def test_goal_must_be_chosen_and_examples_show_in_empty_fields():
     goal = next(s for s in at.selectbox if s.label == "Main goal of the content")
     assert goal.value is None and "Get enquiries and bookings" in goal.options
     areas = {t.label: t for t in at.text_area}
-    assert "Dental:" in areas["Services or products you offer (optional)"].placeholder
-    assert "Travel:" in areas["Who your customers are (optional)"].placeholder
+    assert "Dental:" in areas["Services or products you offer"].placeholder
+    assert "Travel:" in areas["Who your customers are"].placeholder
     at.text_input[0].set_value("dental clinic")
     at.button[0].click().run()
     assert any("Choose the main goal" in e.value for e in at.error)
+    goal = next(s for s in at.selectbox if s.label == "Main goal of the content")
+    goal.set_value("Get enquiries and bookings")
+    at.button[0].click().run()
+    assert any("services or products you offer" in e.value for e in at.error)   # now mandatory too
+    areas = {t.label: t for t in at.text_area}
+    areas["Services or products you offer"].set_value("root canal, implants")
+    areas["Who your customers are"].set_value("families")
+    at.button[0].click().run()
+    assert any("who the plan is for" in e.value for e in at.error)
 
 
 def test_results_view_renders_saved_project():

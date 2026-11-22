@@ -227,11 +227,11 @@ with st.form("input"):
                         help="Decides what kind of pages the plan favours: e.g. bookings → service, cost and local "
                              "pages; traffic → questions and guides.")
     c3, c4 = st.columns(2)
-    offerings = c3.text_area("Services or products you offer (optional)", placeholder=B.EXAMPLES["offerings"],
+    offerings = c3.text_area("Services or products you offer", placeholder=B.EXAMPLES["offerings"],
                              height=165, help="The plan covers only what you offer, and pillars follow these lines.")
-    customers = c4.text_area("Who your customers are (optional)", placeholder=B.EXAMPLES["customers"],
+    customers = c4.text_area("Who your customers are", placeholder=B.EXAMPLES["customers"],
                              height=165, help="Angles and searches are written from these customers' point of view.")
-    plan_for = st.text_input("Who the plan is for (optional)", placeholder=B.EXAMPLES["plan_for"],
+    plan_for = st.text_input("Who the plan is for", placeholder=B.EXAMPLES["plan_for"],
                              help="For a client, titles avoid first-person claims like 'our clinic'.")
     full = st.checkbox("Also build the topical map, content plan and keyword mapping (Stages 4–6)", value=True,
                        help="Turn off to check the keyword clusters first; you can build the rest later.")
@@ -245,6 +245,12 @@ if go:
         problem = "Keep the topic and location under 80 characters."
     elif not goal:
         problem = "Choose the main goal of the content."
+    elif not offerings.strip():
+        problem = "Enter the services or products you offer."
+    elif not customers.strip():
+        problem = "Enter who your customers are."
+    elif not plan_for.strip():
+        problem = "Enter who the plan is for."
     elif setup_problem():
         problem = setup_problem()
     elif C.ONLINE and not using_own and not quota.use(vid):
