@@ -19,7 +19,8 @@ from planner.cluster import cluster_keywords, filter_keywords
 from planner.embed import FastEmbedder, OllamaEmbedder
 from planner.export import to_excel
 from planner.fanout import run_fanout
-from planner.llm import LLM, FallbackLLM, LLMError, build_stage_models, ollama_running
+from planner import brief as B
+from planner.llm import LLM, FallbackLLM, LLMError, build_stage_models, ollama_running, with_brief
 from planner.mapviz import map_html
 from planner.plan import build_content_plan
 from planner.project import filename, new_project
@@ -220,8 +221,18 @@ st.caption("Type a service, category or topic. The planner finds the searches ar
 
 with st.form("input"):
     c1, c2 = st.columns([3, 2])
-    topic = c1.text_input("Service / category / topic", placeholder="Dental clinic")
-    location = c2.text_input("Location (optional)", placeholder="Newtown, Kolkata")
+    topic = c1.text_input("Service / category / topic", placeholder=B.EXAMPLES["topic"])
+    location = c2.text_input("Location (optional)", placeholder=B.EXAMPLES["location"])
+    goal = st.selectbox("Main goal of the content", list(B.GOALS), index=None, placeholder="Choose a goal",
+                        help="Decides what kind of pages the plan favours: e.g. bookings → service, cost and local "
+                             "pages; traffic → questions and guides.")
+    c3, c4 = st.columns(2)
+    offerings = c3.text_area("Services or products you offer (optional)", placeholder=B.EXAMPLES["offerings"],
+                             height=120, help="The plan covers only what you offer, and pillars follow these lines.")
+    customers = c4.text_area("Who your customers are (optional)", placeholder=B.EXAMPLES["customers"],
+                             height=120, help="Angles and searches are written from these customers' point of view.")
+    plan_for = st.text_input("Who the plan is for (optional)", placeholder=B.EXAMPLES["plan_for"],
+                             help="For a client, titles avoid first-person claims like 'our clinic'.")
     full = st.checkbox("Also build the topical map, content plan and keyword mapping (Stages 4–6)", value=True,
                        help="Turn off to check the keyword clusters first; you can build the rest later.")
     go = st.form_submit_button("Build content plan", type="primary", icon=":material/play_arrow:")
@@ -232,6 +243,8 @@ if go:
         problem = "Enter a service, category or topic first."
     elif len(topic) > 80 or len(location) > 80:
         problem = "Keep the topic and location under 80 characters."
+    elif not goal:
+        problem = "Choose the main goal of the content."
     elif setup_problem():
         problem = setup_problem()
     elif C.ONLINE and not using_own and not quota.use(vid):
@@ -242,6 +255,8 @@ if go:
         st.error(problem)
     else:
         project = new_project(topic, location)
+        project["brief"] = B.clean({"goal": goal, "offerings": offerings, "customers": customers,
+                                    "plan_for": plan_for})
         ss["paid"].add(project["created"])
         ss["notices"] = []
         llm = None
@@ -252,7 +267,7 @@ if go:
                 def notice(msg):  # model switches are normal: recorded for the Quality report, not shown as warnings
                     ss["notices"].append(msg)
 
-                llm = build_llm(notice)
+                llm = with_brief(build_llm(notice), B.brief_text(project["brief"]))
                 st.write(f"AI: **{llm.label}** · embeddings: **{embedder_kind()}**")
                 share = 0.55 if full else 0.8
                 rows, report = run_fanout(llm, get_embedder(embedder_kind()), topic, location, n_per_angle,
@@ -285,6 +300,8 @@ if project and project.get("stage2"):
     st.divider()
     loc = f" · {project['location']}" if project.get("location") else ""
     st.subheader(f"{project['topic']}{loc}")
+    if B.summary(project.get("brief")):
+        st.caption(B.summary(project.get("brief")))
 
     s4, s5, s6 = project.get("stage4"), project.get("stage5"), project.get("stage6")
     clusters = s3["clusters"]
@@ -318,7 +335,8 @@ if project and project.get("stage2"):
                     try:
                         with st.status("Building topical map and content plan…", expanded=True) as status:
                             bar = st.progress(0.0, text="Starting")
-                            run_stages_456(project, build_llm(lambda msg: ss["notices"].append(msg)),
+                            run_stages_456(project, with_brief(build_llm(lambda msg: ss["notices"].append(msg)),
+                                                               B.brief_text(project.get("brief"))),
                                            lambda m_, f: bar.progress(min(f, 1.0), text=m_))
                             status.update(label="Content plan ready", state="complete", expanded=False)
                         st.rerun()
@@ -432,7 +450,8 @@ if project and project.get("stage2"):
                              "funnel": funnel, "kind": r.get("kind") or ""})
             try:
                 with st.spinner("Rebuilding clusters…"):
-                    llm = build_llm(lambda msg: None) if not setup_problem() else None
+                    llm = with_brief(build_llm(lambda msg: None), B.brief_text(project.get("brief"))) \
+                        if not setup_problem() else None
                     s2["keywords"] = rows
                     run_stage3(project, rows, llm, lambda m, f: None)
                 st.rerun()

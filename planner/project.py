@@ -1,4 +1,4 @@
-"""A project = everything one run produced. Saved as JSON so visitors can download it and upload it later."""
+"""A project = everything one run produced (the topic, the business brief and each stage's results)."""
 from __future__ import annotations
 
 import json

@@ -36,6 +36,11 @@ def _title(ws, title: str, project: dict, note: str) -> None:
     ws["A2"].font = Font(name=FONT, size=10, color=MUTED)
     ws["A3"] = note
     ws["A3"].font = Font(name=FONT, size=9, italic=True, color=MUTED)
+    from .brief import summary
+
+    if summary(project.get("brief")):  # what the plan was built for (row 4 is empty in every tab)
+        ws["A4"] = summary(project.get("brief"))
+        ws["A4"].font = Font(name=FONT, size=9, color=MUTED)
 
 
 def _header(ws, row: int, cols: list[str], accent: str) -> None:

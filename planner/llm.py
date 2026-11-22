@@ -381,6 +381,27 @@ def build_stage_models(keys: dict[str, str], default: FallbackLLM, on_switch=Non
     return StageModels(chains, default)
 
 
+class WithBrief:
+    """Adds the business brief (goal, offerings, customers, who the plan is for) to the top of every AI request,
+    in every stage. Everything else (calls, notes, used(), stats()) comes from the wrapped model(s)."""
+
+    def __init__(self, inner, brief: str):
+        self.inner, self.brief = inner, brief
+
+    def json(self, system: str, user: str, temperature: float = 0.7) -> dict:
+        return self.inner.json(system, f"{self.brief}\n\n{user}" if self.brief else user, temperature)
+
+    def for_stage(self, stage: str):
+        return WithBrief(for_stage(self.inner, stage), self.brief)
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+
+def with_brief(llm, brief: str):
+    return WithBrief(llm, brief) if brief else llm
+
+
 def get_list(data: dict, key: str) -> list:
     """The list an answer gives under `key`. Models sometimes return the bare list instead of {"key": [...]}
     (parse_json wraps that as {"items": [...]}), or use another name for the only list; both are accepted, so a

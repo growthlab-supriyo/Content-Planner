@@ -6,7 +6,7 @@ map, content ideas across 22 content types, and keyword-to-page mapping.
 
 | Stage | What it does | Status |
 |---|---|---|
-| 1. Input | Topic (required) + location (optional) | Done |
+| 1. Input | Topic and main goal (required); location, services or products offered, customers and who the plan is for (optional). The answers go into every AI step | Done |
 | 2. Query fan-out | The AI studies the topic and chooses its search angles (the 7 standard angles are the fallback), one focused pass per angle with quality checks, then the AI tags each keyword's intent and funnel stage | Done |
 | 3. Filter & cluster | Removes single words; the AI picks the two-word terms too generic to plan a page around. Then keywords are grouped into clusters (one theme and one intent each, no size limit) | Done |
 | 4. Topical map | Topic → Pillar → Cluster → Subtopic (H2s); gap check adds missing pages as "AI-suggested"; interactive map | Done |

@@ -242,3 +242,34 @@ def test_gemini_bad_key_400_counts_as_a_rejected_key(monkeypatch):
             L.LLM("Gemini", m, "bad", backups=False, min_interval=0).json("s", "u")
     assert calls == ["gemini-3.5-flash-lite"]
     L.LLM._rejected_keys.clear()
+
+
+def test_brief_goes_into_every_ai_request():
+    from planner.brief import brief_text, clean, summary
+    from planner.llm import with_brief
+
+    brief = {"goal": "Get enquiries and bookings", "offerings": "root canal,  implants", "customers": " ",
+             "plan_for": "My own clinic", "extra": "ignored"}
+    assert clean(brief) == {"goal": "Get enquiries and bookings", "offerings": "root canal, implants",
+                            "plan_for": "My own clinic"}
+    text = brief_text(brief)
+    assert "Goal of the content: Get enquiries and bookings" in text and "root canal, implants" in text
+    assert "customers" not in text.lower().split("services")[0]  # empty answers are left out
+    assert summary(brief).startswith("Goal: Get enquiries and bookings")
+    assert brief_text({}) == "" and with_brief("model", "") == "model"   # no brief: nothing changes
+
+    seen = []
+
+    class Rec:
+        calls, label = 3, "rec"
+
+        def json(self, system, user, temperature=0.7):
+            seen.append(user)
+            return {}
+
+    llm = with_brief(StageModels({"angles": FallbackLLM([Rec()])}, FallbackLLM([Rec()])), text)
+    llm.json("s", "default stage prompt")
+    from planner.llm import for_stage
+    for_stage(llm, "angles").json("s", "angles prompt")
+    assert all(u.startswith("About this business") for u in seen) and seen[1].endswith("angles prompt")
+    assert llm.label == "a different model for each stage"  # other attributes come from the wrapped models
