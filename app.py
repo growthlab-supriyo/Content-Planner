@@ -94,7 +94,21 @@ with st.sidebar:
                               help=C.PROVIDERS[name].key_help) or ""
             if k.strip():
                 user_keys[name] = k.strip()
-    using_own = bool(user_keys)
+
+        # A paid key: every stage runs on this one model (paid limits are high, so no rotation is needed)
+        st.divider()
+        st.markdown("**Paid API key** (optional)")
+        st.caption("With a paid key, every stage runs on this one model: no daily limit and no switching between "
+                   "free models. Paid keys are charged by the provider for what the run uses.")
+        paid_provider = st.selectbox("Provider", cloud, key="paid_provider",
+                                     help="OpenRouter gives one key for many paid models (DeepSeek, GPT, Claude...).")
+        paid_model = st.text_input("Model", value=C.PAID_MODELS.get(paid_provider, ""),
+                                   key=f"paid_model_{paid_provider}",
+                                   help="Any chat model your paid key can use; the default is a strong, low-cost one.")
+        paid_key = (st.text_input("Paid API key", type="password", key="paid_key") or "").strip()
+    paid = (paid_provider, paid_model.strip() or C.PAID_MODELS.get(paid_provider, ""), paid_key) if paid_key \
+        else None
+    using_own = bool(user_keys or paid)
 
     def active_keys() -> dict[str, str]:
         """Keys this run uses. Online with a visitor's own keys: only theirs (the owner's keys stay unused)."""
@@ -134,36 +148,42 @@ with st.sidebar:
 
     have = active_keys()
     singles = [m for m in C.SINGLE_MODELS if m[0] in have or (m[0] == "Local Ollama" and not C.ONLINE)]
-    model_mode = st.radio(
-        "Models", ["A different model for each stage", "One model for everything"],
-        index=0 if have else 1, disabled=not have,
-        help="A different model for each stage: each step uses the free model that does it best, and moves to its "
-             "backups when one runs out. One model for everything: you pick the model, and every step uses it."
-        if have else "Add a Gemini, Groq or OpenRouter key to use a different model for each stage.")
-    per_stage = bool(have) and model_mode.startswith("A different")
-    single = None
-    if per_stage:
-        st.caption(C.PER_STAGE_EFFECT)
-        with st.expander(":material/model_training: Models used in each stage"):
-            for stage, label in C.STAGES.items():
-                models = [m for pv, m in C.STAGE_MODELS[stage] if pv in have]
-                st.markdown(f"**{label}**  \n" + " → ".join(f"`{m}`" for m in models))
-            st.caption("Each stage moves to the next model when one hits its free limit or isn't available.")
+    per_stage, single = False, None
+    if paid:
+        st.caption(f":material/workspace_premium: Every stage runs on your paid model: **{paid[1]}** ({paid[0]}).")
     else:
-        labels = [m[2] for m in singles]
-        pick = st.selectbox("Model for every stage", labels, index=0,
-                            help="Every step (angles, queries, tagging, clusters, pillars, H2s, titles) uses this "
-                                 "model. If it hits its free limit, the run moves to your other keys' models.")
-        single = next(m for m in singles if m[2] == pick)
-        st.caption(f"**What changes:** {single[3]}")
-        if single[0] == "Local Ollama" and ollama_ok and not any(
-                x.split(":")[0] == single[1].split(":")[0] for x in ollama_models):
-            st.warning(f"Model '{single[1]}' isn't installed. Run: `ollama pull {single[1]}`")
+        model_mode = st.radio(
+            "Models", ["A different model for each stage", "One model for everything"],
+            index=0 if have else 1, disabled=not have,
+            help="A different model for each stage: each step uses the free model that does it best, and moves to "
+                 "its backups when one runs out. One model for everything: you pick the model, and every step "
+                 "uses it." if have else "Add a Gemini, Groq or OpenRouter key to use a different model for each "
+                                         "stage.")
+        per_stage = bool(have) and model_mode.startswith("A different")
+        if per_stage:
+            st.caption(C.PER_STAGE_EFFECT)
+            with st.expander(":material/model_training: Models used in each stage"):
+                for stage, label in C.STAGES.items():
+                    models = [m for pv, m in C.STAGE_MODELS[stage] if pv in have]
+                    st.markdown(f"**{label}**  \n" + " → ".join(f"`{m}`" for m in models))
+                st.caption("Each stage moves to the next model when one hits its free limit or isn't available.")
+        else:
+            labels = [m[2] for m in singles]
+            pick = st.selectbox("Model for every stage", labels, index=0,
+                                help="Every step (angles, queries, tagging, clusters, pillars, H2s, titles) uses this "
+                                     "model. If it hits its free limit, the run moves to your other keys' models.")
+            single = next(m for m in singles if m[2] == pick)
+            st.caption(f"**What changes:** {single[3]}")
+            if single[0] == "Local Ollama" and ollama_ok and not any(
+                    x.split(":")[0] == single[1].split(":")[0] for x in ollama_models):
+                st.warning(f"Model '{single[1]}' isn't installed. Run: `ollama pull {single[1]}`")
 
-    n_per_angle = st.slider("Queries per angle", 15, C.MAX_QUERIES_PER_ANGLE if not C.ONLINE else 40,
-                            C.DEFAULT_QUERIES_PER_ANGLE, step=5,
-                            help="The AI first studies the topic and chooses its search angles; each angle is then "
-                                 "asked separately. More queries = longer run.")
+    # Plan size: folded away; 15 searches per angle by default (about 2 minutes a run), at most 30
+    with st.expander(":material/tune: Advanced settings"):
+        n_per_angle = st.slider("Queries per angle", C.MIN_QUERIES_PER_ANGLE, C.MAX_QUERIES_PER_ANGLE,
+                                C.DEFAULT_QUERIES_PER_ANGLE, step=5,
+                                help="How many searches the AI writes for each angle it chooses. More = a bigger "
+                                     "plan and a longer run.")
 
 
 def embedder_kind() -> str:
@@ -176,6 +196,8 @@ def embedder_kind() -> str:
 
 def setup_problem() -> str | None:
     """Why a run can't start with the current settings (None when it can)."""
+    if paid:
+        return None if paid[1] else "Type the model name for your paid key."
     if single and single[0] == "Local Ollama":
         return None if ollama_ok else "Ollama isn't running. Start the Ollama app, or choose a cloud model."
     if not have:
@@ -186,8 +208,11 @@ def setup_problem() -> str | None:
 
 def build_llm(notice):
     """The chosen model (or the per-stage chains), with every other model we have a key for as backup, so a run
-    still finishes when one free limit is reached. Locally, Ollama is the last backup when it's running."""
-    backups = [LLM(n, C.PROVIDERS[n].default_model, k) for n, k in have.items()]
+    still finishes when one free limit is reached. Locally, Ollama is the last backup when it's running.
+    With a paid key, every stage runs on that one model, without the free tiers' spacing between calls."""
+    if paid:
+        return FallbackLLM([LLM(paid[0], paid[1], paid[2], backups=False, min_interval=0)], on_switch=notice)
+    backups =[LLM(n, C.PROVIDERS[n].default_model, k) for n, k in have.items()]
     if not C.ONLINE and ollama_ok:
         backups.append(LLM("Local Ollama", C.PROVIDERS["Local Ollama"].default_model))
     if per_stage:

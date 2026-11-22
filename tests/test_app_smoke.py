@@ -24,19 +24,26 @@ def _one_model(at):
     return at
 
 
+def _model_box(at):
+    return next(s for s in at.sidebar.selectbox if s.label == "Model for every stage")
+
+
 def test_local_app_starts():
     at = _one_model(_run(False))
     assert not at.exception
-    assert any("Ollama" in o for o in at.sidebar.selectbox[0].options)
+    assert any("Ollama" in o for o in _model_box(at).options)
 
 
 def test_online_app_hides_ollama_and_shows_three_key_boxes(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")  # an owner key, so a model can be chosen
     at = _one_model(_run(True))
     assert not at.exception
-    assert not any("Ollama" in o for o in at.sidebar.selectbox[0].options)
+    assert not any("Ollama" in o for o in _model_box(at).options)
     assert not any(s.label in ("AI provider", "Model") for s in at.sidebar.selectbox)  # no provider/model boxes
-    assert [t.label for t in at.sidebar.text_input] == ["Gemini API key", "Groq API key", "OpenRouter API key"]
+    assert [t.label for t in at.sidebar.text_input][:3] == ["Gemini API key", "Groq API key", "OpenRouter API key"]
+    assert "Paid API key" in [t.label for t in at.sidebar.text_input]          # one paid key runs every stage
+    qpa = at.sidebar.slider[0]
+    assert (qpa.label, qpa.value, qpa.max) == ("Queries per angle", 15, 30)   # folded away, 15 by default
     assert any("Use your own API keys" in e.label for e in at.sidebar.expander)
     assert not any("fan-out prompts" in e.label for e in at.sidebar.expander)
     assert any("What changes" in c.value for c in at.sidebar.caption)  # the single model's effect is explained

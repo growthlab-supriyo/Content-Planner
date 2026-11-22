@@ -145,8 +145,14 @@ FREE_RUNS_PER_DAY = 3
 OWNER_KEY_DAILY_CAP = int(os.environ.get("CP_DAILY_CAP", "150"))  # all visitors together
 
 # Fan-out size
-DEFAULT_QUERIES_PER_ANGLE = 30
-MAX_QUERIES_PER_ANGLE = 60
+DEFAULT_QUERIES_PER_ANGLE = 15
+MIN_QUERIES_PER_ANGLE = 10
+MAX_QUERIES_PER_ANGLE = 30
+
+# A visitor's paid key: every stage runs on this one model (no free-tier spacing, no switching).
+# The default model per provider is a strong, inexpensive choice; the user can type another.
+PAID_MODELS = {"Gemini": "gemini-3.8-flash", "Groq": "openai/gpt-oss-120b",
+               "OpenRouter": "deepseek/deepseek-v4.1-flash"}
 MAX_RETRIES_PER_ANGLE = 2
 
 # When an AI step fails or skips items, ask again (instead of falling back to rules)
