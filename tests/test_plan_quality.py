@@ -227,3 +227,34 @@ def test_news_and_interviews_are_never_planned():
     types = {t["type"]: t for t in decide_types([], [], FakeLLM([answer]), "Hotel management college", "")}
     assert types["News Article"]["decision"] == types["Interview"]["decision"] == "Skipped"
     assert "real" in types["Interview"]["reason"] and types["Guide"]["decision"] == "Used"
+
+
+def test_old_years_in_titles_become_the_current_year():
+    y = Q.current_year()
+    assert Q.fix_years("Salary Trends for Hotel Management Graduates 2019") == \
+        f"Salary Trends for Hotel Management Graduates {y}"
+    assert Q.fix_years(f"Plans for {y + 1}") == f"Plans for {y + 1}" and Q.fix_years("Room 12019") == "Room 12019"
+
+
+def test_a_pillar_with_too_few_pages_joins_the_closest_pillar():
+    import numpy as np
+    from planner.topicmap import merge_small_pillars
+
+    v = {1: np.array([1.0, 0, 0]), 2: np.array([1.0, 0.1, 0]), 3: np.array([0.9, 0.2, 0]),
+         4: np.array([0, 1.0, 0]), 5: np.array([0, 1.0, 0.1]), 6: np.array([0, 0.9, 0.2]),
+         7: np.array([0.95, 0.05, 0])}
+    pillars = [{"name": "Fees", "cluster_ids": [1, 2, 3]}, {"name": "Careers", "cluster_ids": [4, 5, 6]},
+               {"name": "Comparison & Decision Guides", "cluster_ids": [7]}]
+    assert merge_small_pillars(pillars, v) == 1
+    assert [p["name"] for p in pillars] == ["Fees", "Careers"] and 7 in pillars[0]["cluster_ids"]
+
+
+def test_tagging_shows_the_ai_each_querys_angle():
+    from planner.fanout import tag_intents
+
+    rows = [{"keyword": "download hotel management application form", "angle": "Enroll Now", "kind": "action",
+             "intent": "Informational", "funnel": "TOFU"}]
+    llm = FakeLLM([{"tags": [{"q": "download hotel management application form [Enroll Now · ready to act]",
+                              "intent": "Transactional", "funnel": "BOFU"}]}])
+    assert tag_intents(llm, rows, "Hotel management college") == 1
+    assert "[Enroll Now · ready to act]" in llm.prompts[0] and rows[0]["funnel"] == "BOFU"

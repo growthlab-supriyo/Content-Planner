@@ -28,6 +28,19 @@ INTENTS = ("Informational", "Commercial", "Transactional", "Local")
 FUNNEL = {"Informational": "TOFU", "Commercial": "MOFU", "Transactional": "BOFU", "Local": "BOFU"}
 
 
+def current_year() -> int:
+    from datetime import date
+
+    return date.today().year
+
+
+def fix_years(text: str) -> str:
+    """An older year in a title ("Salary Trends 2024", written in 2026) becomes the current year: models often
+    repeat the year of their training data. Years in the future are left alone."""
+    year = current_year()
+    return re.sub(r"\b(20[0-9]{2})\b", lambda m: str(year) if 2000 <= int(m.group(1)) < year else m.group(1), text)
+
+
 def clean(q: str) -> str:
     q = str(q).strip().lower()
     q = re.sub(r"^\s*(?:\d+[.)\-:]|[-*•])\s*", "", q)       # "1. ", "- ", "• "

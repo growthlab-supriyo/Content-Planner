@@ -135,7 +135,7 @@ def propose_pillars(clusters: list[dict], llm, topic: str, location: str, k: int
             continue
         seen.add(name.lower())
         out.append({"name": name, "covers": covers, "pillar_keyword": Q.clean(p.get("pillar_keyword") or name),
-                    "title": str(p.get("pillar_title") or name).strip()[:120]})
+                    "title": Q.fix_years(str(p.get("pillar_title") or name).strip()[:120])})
     return out if len(out) >= 2 else []
 
 
@@ -358,6 +358,34 @@ def review_pillars(pillars: list[dict], clusters: list[dict], llm, topic: str, l
     return moved
 
 
+MIN_PILLAR_PAGES = 3
+
+
+def merge_small_pillars(pillars: list[dict], vec_of: dict, min_pages: int = MIN_PILLAR_PAGES) -> int:
+    """A pillar with fewer than `min_pages` pages isn't a real area of the site (seen: a 'Comparison & Decision
+    Guides' pillar holding one page). Its pages move to the closest other pillar by meaning, smallest pillar first.
+    Returns how many pillars were merged away."""
+    merged = 0
+    while len(pillars) > 2:
+        small = [p for p in pillars if 0 < len(p["cluster_ids"]) < min_pages]
+        if not small:
+            break
+        src = min(small, key=lambda p: len(p["cluster_ids"]))
+        others = [p for p in pillars if p is not src and p["cluster_ids"]]
+        cen = []
+        for p in others:
+            v = np.mean([vec_of[i] for i in p["cluster_ids"] if i in vec_of], axis=0)
+            cen.append(v / (np.linalg.norm(v) or 1))
+        cen = np.array(cen)
+        for cid in list(src["cluster_ids"]):
+            target = others[int(np.argmax(cen @ vec_of[cid]))] if cid in vec_of else others[0]
+            target["cluster_ids"].append(cid)
+        src["cluster_ids"] = []
+        pillars.remove(src)
+        merged += 1
+    return merged
+
+
 def build_topical_map(project: dict, llm, embedder, progress: Progress | None = None) -> dict:
     progress = progress or (lambda m, f: None)
     topic, location = project["topic"], project.get("location", "")
@@ -386,6 +414,10 @@ def build_topical_map(project: dict, llm, embedder, progress: Progress | None = 
             g.pop("pillar")
     progress("Stage 4 · checking every page sits in the right pillar", 0.9)
     review_pillars(pillars, clusters + gaps, for_stage(llm, "pillars"), topic, location)
+    vec_of = {c["id"]: vecs[i] for i, c in enumerate(clusters)}
+    if gaps:
+        vec_of.update({g["id"]: v for g, v in zip(gaps, gv)})
+    merge_small_pillars(pillars, vec_of)
     pillars = [p for p in pillars if p["cluster_ids"]]
     for i, p in enumerate(pillars, 1):
         p["id"] = i

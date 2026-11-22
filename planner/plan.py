@@ -49,6 +49,7 @@ Titles: specific and natural, like a real article headline, not just the cluster
 in as it is (bad: "Hostel Fee Hotel Management College and Accommodation Details"; good: "Hostel Fees and Rooms at
 a Hotel Management College: What to Expect"). Mention {place} ONLY for
 clusters marked [local]; never on how-to, question, myth, symptom or comparison pieces.
+If a title needs a year, use {year}, never an earlier year.
 Never invent people, doctor names, clinic names, statistics or rankings (no "Dr. Sharma", no "Why We Are the
 Best ..."): the business will fill in real details.
 For each piece copy one keyword EXACTLY from that cluster as "primary". Answer for every cluster.
@@ -212,7 +213,7 @@ def generate_ideas(clusters: list[dict], types: list[dict], llm, topic: str, loc
         try:
             data = llm.json(SYSTEM, IDEAS_PROMPT.format(
                 topic=topic, loc=_loc(location), used=", ".join(used), max_ideas=max_ideas,
-                place=location or "a place name", clusters=text), temperature=0.6)
+                place=location or "a place name", clusters=text, year=Q.current_year()), temperature=0.6)
         except LLMError:
             return
         for item in _list(data, "clusters"):
@@ -252,7 +253,7 @@ def generate_ideas(clusters: list[dict], types: list[dict], llm, topic: str, loc
         seen_titles = set()
         for x in items[:ideas_for(c, max_ideas)]:
             ctype = _pick_type(x.get("type"), used)
-            title = str(x["title"]).strip()[:140]
+            title = Q.fix_years(str(x["title"]).strip()[:140])
             if location and not local_ok(c, places):
                 title = strip_location(title, location)
             if title.lower() == c["name"].lower():  # a bare cluster name is a topic, not a headline
@@ -293,7 +294,7 @@ def fill_missing_types(ideas: list[dict], clusters: list[dict], types: list[dict
             cid = int(x.get("cluster_id"))
         except (TypeError, ValueError):
             continue
-        title = str(x.get("title") or "").strip()[:140]
+        title = Q.fix_years(str(x.get("title") or "").strip()[:140])
         if t in missing and cid in ids and title:
             c = next(c for c in clusters if c["id"] == cid)
             if location and not local_ok(c):

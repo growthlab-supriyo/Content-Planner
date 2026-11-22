@@ -143,6 +143,7 @@ Rules:
 - Vary the wording. Do not start more than 3 queries with the same two words.
 - Do not just add one word to the business name (bad: "{topic_l} cost", "{topic_l} price", "{topic_l} reviews").
 - {location_rule}
+- If a query needs a year, use {year}, never an earlier year.
 - No numbering, no quotes, no duplicates.{feedback}
 
 {examples_intro}
@@ -175,8 +176,10 @@ def build_prompt(angle, topic: str, location: str, n: int, feedback: str = "",
         instruction = a.get("instruction_no_location") if (a["kind"] == "local" and not location) else None
         instruction = instruction or a["instruction"]
     planned = a.get("planned", False)
+    from .quality import current_year
+
     return USER_TEMPLATE.format(
-        topic=topic, topic_l=topic.lower(),
+        topic=topic, topic_l=topic.lower(), year=current_year(),
         location_text=location or "none (not a local search)",
         label=a["label"], instruction=instruction, n=n,
         location_rule=location_rule(a["kind"], location),

@@ -125,7 +125,9 @@ Tag each search query below with:
   BOFU includes the last steps before acting, even when phrased as a question: how to apply or book, admission or
   booking process, forms and documents needed, fees at a named place, timings, contact details, "near me" with a
   specific service, joining or ordering.
-Judge what the searcher wants, not single words. Copy each query exactly as "q".
+Each line shows the query, then in [brackets] the research angle it came from. Use the angle as a hint: queries
+from a "ready to act" angle are usually Transactional and BOFU; from a comparisons or costs angle, usually MOFU.
+Judge what the searcher wants, not single words. Copy each query exactly as "q", without the [angle].
 
 {queries}
 
@@ -143,7 +145,12 @@ def tag_intents(llm, rows: list[dict], topic: str, location: str = "", batch: in
     tagged: dict[str, tuple[str, str]] = {}
 
     def ask(part: list[dict]) -> None:
-        text = "\n".join(f"{i}. {r['keyword']}" for i, r in enumerate(part, 1))
+        def angle_of(r: dict) -> str:
+            hint = {"action": "ready to act", "comparisons": "comparisons", "costs": "costs"}.get(r.get("kind", ""))
+            label = r.get("angle") or ""
+            return f" [{label}{' · ' + hint if hint and hint.lower() not in label.lower() else ''}]" if label else ""
+
+        text = "\n".join(f"{i}. {r['keyword']}{angle_of(r)}" for i, r in enumerate(part, 1))
         try:
             data = llm.json(SYSTEM, TAG_PROMPT.format(topic=topic, loc=f"\nLocation: {location}" if location else "",
                                                       queries=text), temperature=0.1)
@@ -155,7 +162,7 @@ def tag_intents(llm, rows: list[dict], topic: str, location: str = "", batch: in
         for t in get_list(data, "tags"):
             if not isinstance(t, dict):
                 continue
-            q = Q.clean(t.get("q") or "")
+            q = Q.clean(re.sub(r"\[.*?\]", "", str(t.get("q") or "")))  # in case the [angle] was copied too
             intent = str(t.get("intent") or "").strip().title()
             funnel = str(t.get("funnel") or "").strip().upper()
             if q in mine and intent in Q.INTENTS:
