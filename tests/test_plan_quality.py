@@ -196,3 +196,34 @@ def test_pillar_page_takes_its_pages_intent_and_stage(embedder):
     rows, _ = map_keywords(ideas, clusters, pillars, embedder, "Kolkata")
     hub = next(r for r in rows if r["role"] == "Pillar Page")
     assert hub["intent"] == "Informational" and hub["funnel"] == "TOFU"
+
+
+def test_enquiry_goal_requires_a_ready_to_act_angle():
+    from planner.fanout import angle_problems, complete_angles, required_kinds
+
+    assert "action" in required_kinds("Kalyani", "Get enquiries and bookings")
+    assert "action" in required_kinds("", "Sell products online")
+    assert "action" not in required_kinds("", "Build traffic and authority")
+    angles = [{"label": k.title(), "kind": k} for k in ("questions", "problems", "costs", "comparisons", "fears")]
+    assert "action" in angle_problems(angles, "", "Get enquiries and bookings")
+    assert complete_angles(angles, "", "Get enquiries and bookings")[-1]["label"] == "Ready to Act"
+    assert Q.classify("hotel management admission form kalyani", "action", [])[0] == "Transactional"
+
+
+def test_place_stays_in_titles_of_pages_whose_searches_name_it():
+    places = ["kalyani"]
+    hostel = {"intent": "Informational", "keywords": ["hostel fee hotel management college kalyani",
+                                                      "hotel management hostel cost kalyani", "hostel rules"]}
+    general = {"intent": "Informational", "keywords": ["what is hotel management", "hotel management syllabus"]}
+    assert local_ok(hostel, places) and not local_ok(general, places)
+
+
+def test_news_and_interviews_are_never_planned():
+    from planner.plan import decide_types
+
+    answer = {"types": [{"type": "News Article", "decision": "Used", "reason": "x"},
+                        {"type": "Interview", "decision": "Used", "reason": "x"},
+                        {"type": "Guide", "decision": "Used", "reason": "x"}]}
+    types = {t["type"]: t for t in decide_types([], [], FakeLLM([answer]), "Hotel management college", "")}
+    assert types["News Article"]["decision"] == types["Interview"]["decision"] == "Skipped"
+    assert "real" in types["Interview"]["reason"] and types["Guide"]["decision"] == "Used"

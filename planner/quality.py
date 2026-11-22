@@ -224,6 +224,8 @@ def classify(q: str, angle: str, loc_tokens: list[str]) -> tuple[str, str]:
     compares = angle == "comparisons" and any(re.search(p, q) for p in COMPARE_PATTERNS)
     if not question and any(re.search(rf"\b{re.escape(w)}\b", q) for w in TRANSACTIONAL_WORDS):
         intent = "Transactional"
+    elif angle == "action":  # people ready to apply, book, buy or get in touch
+        intent = "Transactional"
     elif angle == "local" and not question:
         # Local-angle queries are people choosing a provider in an area, even when the area isn't the
         # location the user typed ("toothache urgent care in shyambazar", "best braces clinic in tollygunge").

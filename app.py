@@ -277,7 +277,8 @@ if go:
                 st.write(f"AI: **{llm.label}** · embeddings: **{embedder_kind()}**")
                 share = 0.55 if full else 0.8
                 rows, report = run_fanout(llm, get_embedder(embedder_kind()), topic, location, n_per_angle,
-                                          progress=lambda m, f: bar.progress(min(f, 1.0) * share, text=m))
+                                          progress=lambda m, f: bar.progress(min(f, 1.0) * share, text=m),
+                                          goal=project["brief"].get("goal", ""))
                 project["stage2"] = {"keywords": rows, "report": report}
                 stop = 0.7 if full else 1.0
                 run_stage3(project, rows, llm,

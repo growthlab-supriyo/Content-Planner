@@ -71,15 +71,23 @@ ANGLES: dict[str, dict] = {
                      "am i too old to start yoga"],
         "check": None,
     },
+    "action": {  # required when the goal is enquiries/bookings or sales (see fanout.required_kinds)
+        "label": "Ready to Act",
+        "instruction": "Searches from people ready to take the next step: apply, enrol, book, buy, order, enquire, "
+                       "call, visit, sign up, admission or booking forms, timings, contact details, offers.",
+        "examples": ["book a trial yoga class", "yoga studio membership sign up", "join prenatal yoga classes",
+                     "yoga class timings and contact"],
+        "check": None,
+    },
 }
 
-ANGLE_ORDER = list(ANGLES)
+ANGLE_ORDER = [k for k in ANGLES if k != "action"]  # the standard 7; "action" is added when the goal needs it
 for _k, _a in ANGLES.items():
     _a.setdefault("key", _k)
     _a.setdefault("kind", _k)
 
 # The kinds an angle can be. The kind decides the quality check run on its list and how the location is used.
-KINDS = ("questions", "costs", "comparisons", "local", "services", "problems", "fears", "other")
+KINDS = ("questions", "costs", "comparisons", "local", "services", "problems", "fears", "action", "other")
 
 ANGLE_PROMPT = """Business / topic: {topic}
 Location: {location_text}
@@ -105,7 +113,8 @@ For each angle give:
 - label: 1 to 4 words, Title Case.
 - kind: one of {kinds}. "questions" = real how/what/why questions, "problems" = symptoms or situations,
   "services" = specific services or products, "costs" = prices and payment, "comparisons" = "x vs y" choices,
-  "fears" = worries, myths and safety doubts, "local" = finding a provider nearby, "other" = none of these.
+  "fears" = worries, myths and safety doubts, "local" = finding a provider nearby, "action" = people ready to
+  act now (apply, enrol, book, buy, enquire, contact, forms, timings), "other" = none of these.
 - instruction: 1 to 2 sentences telling a researcher exactly which searches to write for this angle.
 - examples: 3 or 4 short example searches for this topic.
 
@@ -114,7 +123,9 @@ Return JSON only:
 
 # Kinds every plan must have (local only when there is a location), and the kinds used at most once.
 REQUIRED_KINDS = ("questions", "problems", "costs", "comparisons", "fears")
-SINGLE_KINDS = ("questions", "costs", "comparisons", "fears", "local")
+SINGLE_KINDS = ("questions", "costs", "comparisons", "fears", "local", "action")
+# Goals that need people ready to act: the plan must then have an "action" angle (enquire, apply, book, buy).
+ACTION_GOALS = ("Get enquiries and bookings", "Sell products online")
 
 USER_TEMPLATE = """Business / topic: {topic}
 Location: {location_text}

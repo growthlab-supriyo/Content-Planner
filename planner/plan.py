@@ -45,7 +45,9 @@ the "max" shown for that cluster. The FIRST piece is the main page for that clus
 cluster's keywords need a different format. Choose the type that fits the keywords: prices → Cost Guide;
 "x vs y" → Comparison; symptoms or problems → Help Article; fears or myths → Myth vs Fact or FAQs; many questions →
 FAQs; how-to → Tutorial; "best ..." → Listicle; reviews → Testimonials. Vary types across the plan.
-Titles: specific and natural, like a real article headline, not just the cluster name. Mention {place} ONLY for
+Titles: specific and natural, like a real article headline, not just the cluster name, and never the keyword pasted
+in as it is (bad: "Hostel Fee Hotel Management College and Accommodation Details"; good: "Hostel Fees and Rooms at
+a Hotel Management College: What to Expect"). Mention {place} ONLY for
 clusters marked [local]; never on how-to, question, myth, symptom or comparison pieces.
 Never invent people, doctor names, clinic names, statistics or rankings (no "Dr. Sharma", no "Why We Are the
 Best ..."): the business will fill in real details.
@@ -103,7 +105,16 @@ def decide_types(clusters: list[dict], pillars: list[dict], llm, topic: str, loc
         for t in out:
             if t["type"] in DEFAULT_USED:
                 t["decision"] = "Used"
+    for t in out:  # a plan can't invent these: they need something real (seen: "Interview on Affordable Diplomas")
+        if t["type"] in NEEDS_REAL:
+            t["decision"], t["reason"] = "Skipped", NEEDS_REAL[t["type"]]
     return out
+
+
+NEEDS_REAL = {
+    "News Article": "Needs real news (a new service, event or rule): add one when there is something to announce.",
+    "Interview": "Needs a real person to interview: add one when an expert or the owner is available.",
+}
 
 
 # ---------------- Stage 5b/c: ideas ----------------
@@ -126,9 +137,13 @@ def local_ok(c: dict, places: list[str] | None = None) -> bool:
     that name a place (prices differ by city). Not on comparisons like 'electric vs manual toothbrush'."""
     if c.get("intent") in ("Local", "Transactional"):
         return True
+    kws = c.get("keywords", [])
+    if places and kws and sum(Q.mentions_location(k, places) for k in kws) * 2 >= len(kws):
+        # most of its searches name the place ("hostel fee hotel management college kalyani"): the place belongs
+        # in the title, and cutting it out of a title written around it left broken headlines (seen in testing)
+        return True
     if c.get("intent") != "Commercial":
         return False
-    kws = c.get("keywords", [])
     return any(any(w in k.split() for w in Q.COST_WORDS) for k in kws) or \
         bool(places and any(Q.mentions_location(k, places) for k in kws))
 

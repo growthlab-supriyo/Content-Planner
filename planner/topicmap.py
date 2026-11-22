@@ -34,7 +34,9 @@ such as a service line or a customer need (for a dental clinic, e.g. "Gum Care",
 Rules:
 - Every page above must fit one pillar. Together the pillars cover all the pages.
 - A pillar is a broad area, never one narrow page, one symptom or one neighbourhood.
-- Names are different from each other and don't overlap in meaning.{loc_pillar}
+- Names are different from each other and don't overlap in meaning: each subject (fees, admissions, campus life,
+  careers, a service line...) belongs to exactly ONE pillar. Don't make a general pillar (e.g. "Programs" or
+  "Services") that also takes fees, admissions or location pages when those have their own pillar.{loc_pillar}
 For each pillar give:
 - name: 2 to 5 words, Title Case.
 - covers: 6 to 12 short phrases naming the subjects it holds (taken from the pages above).
@@ -297,9 +299,11 @@ def find_gaps(pillars: list[dict], clusters: list[dict], all_keywords: list[str]
 
 REVIEW_PROMPT = """Business / topic: {topic}{loc}
 
-Pages were placed into pillars (the main areas of the site) by meaning. Check every page: does it clearly belong to
-a DIFFERENT pillar? Move only clear misfits (e.g. "Best Dentist in Kolkata" under "Cosmetic Dentistry" belongs under
-a pillar about choosing a dentist). Leave pages that fit reasonably well. Copy page and pillar names exactly.
+Pages were placed into pillars (the main areas of the site) by meaning. Check every page: which pillar's subject
+does it match best? Move every page that fits another pillar better than the one it is in (e.g. "Best Dentist in
+Kolkata" under "Cosmetic Dentistry" belongs under a pillar about choosing a dentist; a fees page under "Programs"
+belongs under a fees pillar if there is one). Pillars must not overlap: each subject sits in one pillar only.
+Copy page and pillar names exactly.
 
 {pillars}
 
