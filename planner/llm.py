@@ -109,6 +109,8 @@ class LLM:
         self._list_tried = not backups
         self._min_interval = p.min_interval if min_interval is None else min_interval
         self.exhausted = False  # daily limit reached: skip this model for the rest of the run
+        self._max_param = "max_tokens"   # becomes max_completion_tokens if the model asks for it (OpenAI)
+        self._send_temperature = True    # dropped if the model takes only its default temperature
         self._last_call = 0.0
         self.calls = 0
         self.ok = 0          # calls that returned usable JSON
@@ -153,7 +155,7 @@ class LLM:
         if self._key and (self.provider, self._key) in LLM._rejected_keys:
             self.exhausted = True
             raise ModelUnavailable(f"{self.provider} did not accept the API key.")
-        for attempt in range(4):
+        for attempt in range(6):  # room to drop a few unsupported options one at a time
             # Some models (Gemma) take no system message: then it goes at the top of the user message.
             if self._system_ok:
                 msgs = [{"role": "system", "content": system}, {"role": "user", "content": user}]
@@ -161,8 +163,9 @@ class LLM:
                 msgs = [{"role": "user", "content": f"{system}\n\n{user}"}]
             # max_tokens stops a small model that gets stuck repeating itself (seen once: 12 minutes on one call).
             # Normal answers here are well under 1,200 tokens; a cut-off answer is unreadable JSON and is re-asked.
-            payload = {"model": self.model, "messages": msgs, "temperature": temperature,
-                       "max_tokens": self._max_tokens}
+            payload = {"model": self.model, "messages": msgs, self._max_param: self._max_tokens}
+            if self._send_temperature:
+                payload["temperature"] = temperature
             if self._thinking:
                 payload["reasoning_effort"] = "low"
             if self._json_mode:
@@ -209,6 +212,13 @@ class LLM:
                     self.exhausted = True
                     raise ModelUnavailable(f"{self.provider} did not accept the API key.") from None
                 if e.status == 400:  # an option this model doesn't take: drop options one by one
+                    # OpenAI's newer models want max_completion_tokens and only their default temperature
+                    if "max_completion_tokens" in e.message and self._max_param == "max_tokens":
+                        self._max_param = "max_completion_tokens"
+                        continue
+                    if "temperature" in e.message.lower() and self._send_temperature:
+                        self._send_temperature = False
+                        continue
                     if self._thinking and "reason" in e.message.lower():
                         self._thinking = False
                         continue

@@ -273,3 +273,58 @@ def test_brief_goes_into_every_ai_request():
     for_stage(llm, "angles").json("s", "angles prompt")
     assert all(u.startswith("About this business") for u in seen) and seen[1].endswith("angles prompt")
     assert llm.label == "a different model for each stage"  # other attributes come from the wrapped models
+
+
+def test_openai_style_models_get_the_settings_they_accept(monkeypatch):
+    """Newer OpenAI models want max_completion_tokens and only their default temperature."""
+    sent = []
+
+    def fake_post(url, payload, key, timeout):
+        sent.append(dict(payload))
+        if "max_tokens" in payload:
+            raise L.HTTPError(400, "Unsupported parameter: 'max_tokens'. Use 'max_completion_tokens' instead.")
+        if "temperature" in payload:
+            raise L.HTTPError(400, "Unsupported value: 'temperature' does not support 0.4 with this model.")
+        return {"choices": [{"message": {"content": '{"ok": 1}'}}]}
+
+    monkeypatch.setattr(L, "post_json", fake_post)
+    m = L.LLM("OpenAI", "gpt-6.2-sol", "key", backups=False, min_interval=0)
+    assert m.json("s", "u", temperature=0.4) == {"ok": 1}
+    assert "max_completion_tokens" in sent[-1] and "temperature" not in sent[-1]
+
+
+def test_paid_providers_are_listed_by_their_brand_names():
+    from planner import config as C
+
+    assert C.label("Gemini") == "Google" and C.label("Anthropic") == "Anthropic (Claude)"
+    assert list(C.PAID_MODELS)[:3] == ["OpenAI", "Anthropic", "Gemini"]
+    assert C.PAID_MODELS["Anthropic"] == "claude-opus-5-5"
+    assert "OpenAI" not in C.available_providers()   # paid-only: not offered as a free key or in per-stage chains
+
+
+def test_claude_client_uses_the_sdk_with_fallbacks_and_reads_json(monkeypatch):
+    from planner import anthropic_llm as A
+
+    calls = []
+
+    class Block:
+        def __init__(self, type_, text=""):
+            self.type, self.text = type_, text
+
+    class Resp:
+        stop_reason = "end_turn"
+        content = [Block("thinking"), Block("text", '{"ok": 1}')]
+
+    class FakeMessages:
+        def create(self, **kw):
+            calls.append(kw)
+            return Resp()
+
+    llm = A.AnthropicLLM("claude-opus-5-5", "sk-ant-test")
+    fake = type("C", (), {"messages": FakeMessages(), "beta": type("B", (), {"messages": FakeMessages()})()})()
+    monkeypatch.setattr(llm, "_client", fake)
+    assert llm.json("sys", "user", temperature=0.9) == {"ok": 1}
+    kw = calls[0]
+    assert kw["model"] == "claude-opus-5-5" and kw["fallbacks"] == "default" and kw["betas"] == [A.FALLBACK_BETA]
+    assert kw["output_config"] == {"effort": "medium"} and "temperature" not in kw and kw["system"] == "sys"
+    assert llm.calls == 1 and llm.ok == 1 and llm.label == "Anthropic · claude-opus-5-5"

@@ -90,7 +90,7 @@ with st.sidebar:
                    "Keys saved in .streamlit/secrets.toml are used automatically. Type one here to use a different "
                    "key in this session.")
         for name in cloud:
-            k = st.text_input(f"{name} API key", type="password", key=f"key_{name}",
+            k = st.text_input(f"{C.label(name).split(' (')[0]} API key", type="password", key=f"key_{name}",
                               help=C.PROVIDERS[name].key_help) or ""
             if k.strip():
                 user_keys[name] = k.strip()
@@ -100,14 +100,12 @@ with st.sidebar:
         st.markdown("**Paid API key** (optional)")
         st.caption("With a paid key, every stage runs on this one model: no daily limit and no switching between "
                    "free models. Paid keys are charged by the provider for what the run uses.")
-        paid_provider = st.selectbox("Provider", cloud, key="paid_provider",
-                                     help="OpenRouter gives one key for many paid models (DeepSeek, GPT, Claude...).")
-        paid_model = st.text_input("Model", value=C.PAID_MODELS.get(paid_provider, ""),
-                                   key=f"paid_model_{paid_provider}",
-                                   help="Any chat model your paid key can use; the default is a strong, low-cost one.")
-        paid_key = (st.text_input("Paid API key", type="password", key="paid_key") or "").strip()
-    paid = (paid_provider, paid_model.strip() or C.PAID_MODELS.get(paid_provider, ""), paid_key) if paid_key \
-        else None
+        paid_provider = st.selectbox("Provider", list(C.PAID_MODELS), format_func=C.label, key="paid_provider",
+                                     help="OpenRouter gives one key for many paid models.")
+        st.caption(f"Model used: `{C.PAID_MODELS[paid_provider]}` (chosen for quality at a fair price).")
+        paid_key = (st.text_input(f"{C.label(paid_provider)} paid API key", type="password", key="paid_key",
+                                  help=C.PROVIDERS[paid_provider].key_help) or "").strip()
+    paid = (paid_provider, C.PAID_MODELS[paid_provider], paid_key) if paid_key else None
     using_own = bool(user_keys or paid)
 
     def active_keys() -> dict[str, str]:
@@ -150,7 +148,8 @@ with st.sidebar:
     singles = [m for m in C.SINGLE_MODELS if m[0] in have or (m[0] == "Local Ollama" and not C.ONLINE)]
     per_stage, single = False, None
     if paid:
-        st.caption(f":material/workspace_premium: Every stage runs on your paid model: **{paid[1]}** ({paid[0]}).")
+        st.caption(f":material/workspace_premium: Every stage runs on your paid key: **{C.label(paid[0])}** · "
+                   f"`{paid[1]}`.")
     else:
         model_mode = st.radio(
             "Models", ["A different model for each stage", "One model for everything"],
@@ -197,7 +196,7 @@ def embedder_kind() -> str:
 def setup_problem() -> str | None:
     """Why a run can't start with the current settings (None when it can)."""
     if paid:
-        return None if paid[1] else "Type the model name for your paid key."
+        return None
     if single and single[0] == "Local Ollama":
         return None if ollama_ok else "Ollama isn't running. Start the Ollama app, or choose a cloud model."
     if not have:
@@ -211,6 +210,10 @@ def build_llm(notice):
     still finishes when one free limit is reached. Locally, Ollama is the last backup when it's running.
     With a paid key, every stage runs on that one model, without the free tiers' spacing between calls."""
     if paid:
+        if paid[0] == "Anthropic":  # Claude goes through Anthropic's own SDK
+            from planner.anthropic_llm import AnthropicLLM
+
+            return FallbackLLM([AnthropicLLM(paid[1], paid[2])], on_switch=notice)
         return FallbackLLM([LLM(paid[0], paid[1], paid[2], backups=False, min_interval=0)], on_switch=notice)
     backups =[LLM(n, C.PROVIDERS[n].default_model, k) for n, k in have.items()]
     if not C.ONLINE and ollama_ok:

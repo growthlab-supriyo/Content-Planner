@@ -23,6 +23,7 @@ class Provider:
     # Tried in order when the chosen model answers "not found" (free model names get retired now and then).
     backup_models: tuple[str, ...] = ()
     min_interval: float = 0.0  # seconds between calls, to stay under a free per-minute limit
+    paid_only: bool = False    # offered only as a paid key (no free tier used by the planner)
 
 
 PROVIDERS: dict[str, Provider] = {
@@ -43,7 +44,27 @@ PROVIDERS: dict[str, Provider] = {
     "OpenRouter": Provider(
         "OpenRouter", "https://openrouter.ai/api/v1", "meta-llama/llama-3.3-70b-instruct:free",
         "OPENROUTER_API_KEY", "Free key: openrouter.ai/keys (use models ending in :free)"),
+    # Paid-only providers (a visitor's paid key). All but Anthropic accept the OpenAI chat format; Anthropic is
+    # called through its own SDK (planner/anthropic_llm.py).
+    "OpenAI": Provider("OpenAI", "https://api.openai.com/v1", "gpt-6.2-sol", "OPENAI_API_KEY",
+                       "Key: platform.openai.com/api-keys", paid_only=True),
+    "Anthropic": Provider("Anthropic", "https://api.anthropic.com", "claude-opus-5-5", "ANTHROPIC_API_KEY",
+                          "Key: platform.claude.com/settings/keys", paid_only=True),
+    "DeepSeek": Provider("DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat", "DEEPSEEK_API_KEY",
+                         "Key: platform.deepseek.com/api_keys", paid_only=True),
+    "xAI": Provider("xAI", "https://api.x.ai/v1", "grok-4.7", "XAI_API_KEY", "Key: console.x.ai",
+                    paid_only=True),
+    "Mistral": Provider("Mistral", "https://api.mistral.ai/v1", "mistral-large-latest", "MISTRAL_API_KEY",
+                        "Key: console.mistral.ai/api-keys", paid_only=True),
 }
+
+# Names shown to users ("Google", not "Gemini"); the keys above stay as they are in code and secrets.
+LABELS = {"Gemini": "Google", "OpenAI": "OpenAI (ChatGPT)", "Anthropic": "Anthropic (Claude)", "xAI": "xAI (Grok)",
+          "OpenRouter": "OpenRouter (many models)"}
+
+
+def label(provider: str) -> str:
+    return LABELS.get(provider, provider)
 
 DEFAULT_PROVIDER = "Gemini" if ONLINE else "Local Ollama"
 
@@ -151,8 +172,11 @@ MAX_QUERIES_PER_ANGLE = 30
 
 # A visitor's paid key: every stage runs on this one model (no free-tier spacing, no switching).
 # The default model per provider is a strong, inexpensive choice; the user can type another.
-PAID_MODELS = {"Gemini": "gemini-3.8-flash", "Groq": "openai/gpt-oss-120b",
-               "OpenRouter": "deepseek/deepseek-v4.1-flash"}
+# Order shown in the paid-key drop-down, and the model each one runs (chosen for quality at a fair price,
+# Nov 2026; the user doesn't pick a model).
+PAID_MODELS = {"OpenAI": "gpt-6.2-sol", "Anthropic": "claude-opus-5-5", "Gemini": "gemini-3.8-flash",
+               "DeepSeek": "deepseek-chat", "xAI": "grok-4.7", "Mistral": "mistral-large-latest",
+               "OpenRouter": "deepseek/deepseek-v4.1-flash", "Groq": "openai/gpt-oss-120b"}
 MAX_RETRIES_PER_ANGLE = 2
 
 # When an AI step fails or skips items, ask again (instead of falling back to rules)
@@ -161,4 +185,5 @@ AI_RETRY_PAUSE = 5.0    # seconds between tries (a busy model often answers a fe
 
 
 def available_providers() -> list[str]:
-    return [n for n, p in PROVIDERS.items() if not (ONLINE and p.local_only)]
+    """Providers for the free setup (keys, per-stage models). Paid-only providers appear only in the paid-key box."""
+    return [n for n, p in PROVIDERS.items() if not (ONLINE and p.local_only) and not p.paid_only]

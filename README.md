@@ -48,8 +48,9 @@ and moves to the next model when one hits its daily limit, doesn't exist for the
 The lists are in `STAGE_MODELS` in `planner/config.py`; the sidebar shows them, and "One model for everything" turns
 it off. The quality report tab shows which model each stage ended up using.
 
-A visitor with a **paid key** (Gemini, Groq or OpenRouter) can add it under "Use your own API keys" with a model name;
-every stage then runs on that one model, without free-tier limits. "Queries per angle" (15 by default, up to 30) is
+A visitor with a **paid key** can add it under "Use your own API keys": OpenAI (ChatGPT), Anthropic (Claude), Google,
+DeepSeek, xAI (Grok), Mistral, OpenRouter or Groq. The planner picks the model for each provider (`PAID_MODELS` in
+`planner/config.py`) and every stage runs on it, without free-tier limits. Claude is called through Anthropic's SDK. "Queries per angle" (15 by default, up to 30) is
 under "Advanced settings".
 
 AI calls use plain HTTPS from the Python standard library (every provider accepts the OpenAI chat format), so there's

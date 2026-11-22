@@ -40,8 +40,11 @@ def test_online_app_hides_ollama_and_shows_three_key_boxes(monkeypatch):
     assert not at.exception
     assert not any("Ollama" in o for o in _model_box(at).options)
     assert not any(s.label in ("AI provider", "Model") for s in at.sidebar.selectbox)  # no provider/model boxes
-    assert [t.label for t in at.sidebar.text_input][:3] == ["Gemini API key", "Groq API key", "OpenRouter API key"]
-    assert "Paid API key" in [t.label for t in at.sidebar.text_input]          # one paid key runs every stage
+    assert [t.label for t in at.sidebar.text_input][:3] == ["Google API key", "Groq API key", "OpenRouter API key"]
+    assert any(t.label.endswith("paid API key") for t in at.sidebar.text_input)  # one paid key runs every stage
+    paid = next(s for s in at.sidebar.selectbox if s.label == "Provider")
+    assert [paid.format_func(o) for o in paid.options][:3] == ["OpenAI (ChatGPT)", "Anthropic (Claude)", "Google"]
+    assert not any(t.label == "Model" for t in at.sidebar.text_input)          # the model is chosen for them
     qpa = at.sidebar.slider[0]
     assert (qpa.label, qpa.value, qpa.max) == ("Queries per angle", 15, 30)   # folded away, 15 by default
     assert any("Use your own API keys" in e.label for e in at.sidebar.expander)
